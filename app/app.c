@@ -40,6 +40,9 @@
 #ifdef ENABLE_UART
     #include "app/uart.h"
 #endif
+#ifdef ENABLE_APRS
+    #include "app/aprs_minimal.h"
+#endif
 #include "ARMCM0.h"
 #include "audio.h"
 #include "board.h"
@@ -1607,6 +1610,13 @@ void APP_TimeSlice500ms(void)
     ) {
         BACKLIGHT_TurnOff();
     }
+
+#ifdef ENABLE_APRS
+    // APRS beacon task
+    if (gEeprom.APRS_ON) {
+        APRS_Task();
+    }
+#endif
 
 #ifdef ENABLE_FEAT_F4HWN_SLEEP
     if (gSleepModeCountdown_500ms == gSetting_set_off * 120 && gWakeUp) {

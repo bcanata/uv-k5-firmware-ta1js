@@ -40,6 +40,7 @@ ENABLE_REDUCE_LOW_MID_TX_POWER  ?= 0
 ENABLE_BYP_RAW_DEMODULATORS     ?= 0
 ENABLE_BLMIN_TMP_OFF            ?= 0
 ENABLE_SCAN_RANGES              ?= 1
+ENABLE_APRS                     ?= 0
 
 # ---- CONTRIB MODS ----
 
@@ -107,6 +108,7 @@ OBJS =
 # Startup files
 OBJS += start.o
 OBJS += init.o
+OBJS += syscalls.o
 ifeq ($(ENABLE_OVERLAY),1)
 	OBJS += sram-overlay.o
 endif
@@ -176,6 +178,10 @@ ifeq ($(ENABLE_UART),1)
 endif
 ifeq ($(ENABLE_AM_FIX), 1)
 	OBJS += am_fix.o
+endif
+ifeq ($(ENABLE_APRS),1)
+	OBJS += app/aprs_minimal.o
+	OBJS += driver/crc.o
 endif
 OBJS += audio.o
 OBJS += bitmaps.o
@@ -280,7 +286,7 @@ endif
 
 CFLAGS =
 ifeq ($(ENABLE_CLANG),0)
-	CFLAGS += -Oz -Wall -Werror -mcpu=cortex-m0 -fshort-enums -fno-delete-null-pointer-checks -std=c2x -MMD
+	CFLAGS += -Os -Wall -Werror -mcpu=cortex-m0 -fshort-enums -fno-delete-null-pointer-checks -std=c2x -MMD
 	#CFLAGS += -Os -Wall -Werror -mcpu=cortex-m0 -fno-builtin -fshort-enums -fno-delete-null-pointer-checks -std=c2x -MMD
 	#CFLAGS += -Os -Wall -Werror -mcpu=cortex-m0 -fno-builtin -fshort-enums -fno-delete-null-pointer-checks -std=c11 -MMD
 	#CFLAGS += -Os -Wall -Werror -mcpu=cortex-m0 -fno-builtin -fshort-enums -fno-delete-null-pointer-checks -std=c99 -MMD
@@ -383,6 +389,9 @@ ifeq ($(ENABLE_NO_CODE_SCAN_TIMEOUT),1)
 endif
 ifeq ($(ENABLE_AM_FIX),1)
 	CFLAGS  += -DENABLE_AM_FIX
+endif
+ifeq ($(ENABLE_APRS),1)
+	CFLAGS  += -DENABLE_APRS
 endif
 ifeq ($(ENABLE_AM_FIX_SHOW_DATA),1)
 	CFLAGS  += -DENABLE_AM_FIX_SHOW_DATA
@@ -508,6 +517,7 @@ endif
 
 LDFLAGS =
 LDFLAGS += -z noexecstack -mcpu=cortex-m0 -nostartfiles -Wl,-T,firmware.ld -Wl,--gc-sections
+LDFLAGS += -Wl,-u,_sbrk
 
 # Use newlib-nano instead of newlib
 LDFLAGS += --specs=nano.specs

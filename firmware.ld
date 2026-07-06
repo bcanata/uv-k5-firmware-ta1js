@@ -71,7 +71,9 @@ SECTIONS
 	._user_heap_stack :
 	{
 		. = ALIGN(4);
+		__HeapBase = .;
 		. = . + _Min_Heap_Size;
+		__HeapLimit = .;
 		. = . + _Min_Stack_Size;
 		. = ALIGN(4);
 	} >RAM

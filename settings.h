@@ -302,6 +302,17 @@ typedef struct {
     uint8_t               S0_LEVEL;
     uint8_t               S9_LEVEL;
 #endif
+#ifdef ENABLE_APRS
+    // APRS settings - coordinates stored as integer millionths of degrees
+    // Example: 40.7128° = 40712800, -74.006° = -74006000
+    bool                  APRS_ON;
+    uint8_t               APRS_INTERVAL;
+    char                  APRS_CALLSIGN[10];
+    uint8_t               APRS_SSID;
+    int32_t               APRS_LATITUDE;   // Integer: degrees * 1000000
+    int32_t               APRS_LONGITUDE;  // Integer: degrees * 1000000
+    char                  APRS_COMMENT[32];
+#endif
 } EEPROM_Config_t;
 
 extern EEPROM_Config_t gEeprom;
@@ -329,5 +340,9 @@ void SETTINGS_WriteBuildOptions(void);
 #endif
 #ifdef ENABLE_FEAT_F4HWN
     void SETTINGS_ResetTxLock(void);
+#endif
+#ifdef ENABLE_APRS
+    void SETTINGS_SaveAPRS(void);
+    void SETTINGS_LoadAPRS(void);
 #endif
 #endif

@@ -42,6 +42,9 @@
 
 #include "app/app.h"
 #include "app/dtmf.h"
+#ifdef ENABLE_APRS
+    #include "app/aprs_minimal.h"
+#endif
 #include "bsp/dp32g030/gpio.h"
 #include "bsp/dp32g030/syscon.h"
 
@@ -113,6 +116,10 @@ void Main(void)
 
     SETTINGS_WriteBuildOptions();
     SETTINGS_LoadCalibration();
+
+#ifdef ENABLE_APRS
+    APRS_Init();
+#endif
 
     RADIO_ConfigureChannel(0, VFO_CONFIGURE_RELOAD);
     RADIO_ConfigureChannel(1, VFO_CONFIGURE_RELOAD);

@@ -27,6 +27,7 @@
 #include "gpio.h"
 #include "system.h"
 #include "systick.h"
+#include <string.h>
 
 
 #ifndef ARRAY_SIZE
@@ -1812,3 +1813,6 @@ void BK4819_PlayDTMFEx(bool bLocalLoopback, char Code)
 
     BK4819_ExitTxMute();
 }
+
+// NOTE: APRS AFSK support was experimental and has been removed from this driver for now.
+// The firmware still supports using the menu to key TX via the normal radio TX path.

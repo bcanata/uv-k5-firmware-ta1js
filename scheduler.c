@@ -42,7 +42,7 @@
                 flag = true;             \
     } while (0)
 
-static volatile uint32_t gGlobalSysTickCounter;
+volatile uint32_t gGlobalSysTickCounter;
 
 void SystickHandler(void);
 

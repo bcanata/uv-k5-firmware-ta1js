@@ -451,6 +451,10 @@ void SETTINGS_LoadCalibration(void)
         BK4819_WriteRegister(BK4819_REG_3B, 22656 + gEeprom.BK4819_XTAL_FREQ_LOW);
 //      BK4819_WriteRegister(BK4819_REG_3C, gEeprom.BK4819_XTAL_FREQ_HIGH);
     }
+
+    #ifdef ENABLE_APRS
+        SETTINGS_LoadAPRS();
+    #endif
 }
 
 uint32_t SETTINGS_FetchChannelFrequency(const int channel)
@@ -592,6 +596,85 @@ void SETTINGS_SaveVfoIndices(void)
 
     EEPROM_WriteBuffer(0x0E80, State);
 }
+
+#ifdef ENABLE_APRS
+void SETTINGS_SaveAPRS(void)
+{
+    uint8_t State[96];  // Increased to accommodate all APRS settings
+
+    memset(State, 0xFF, sizeof(State));
+
+    // Byte 0: APRS enable flag
+    State[0] = gEeprom.APRS_ON ? 1 : 0;
+    // Byte 1: Beacon interval (minutes)
+    State[1] = gEeprom.APRS_INTERVAL;
+    // Bytes 2-11: Callsign
+    memcpy(&State[2], gEeprom.APRS_CALLSIGN, 10);
+    // Byte 12: SSID
+    State[12] = gEeprom.APRS_SSID;
+    // Bytes 13-16: Latitude (int32_t millionths of degrees)
+    memcpy(&State[13], &gEeprom.APRS_LATITUDE, sizeof(int32_t));
+    // Bytes 17-20: Longitude (int32_t millionths of degrees)
+    memcpy(&State[17], &gEeprom.APRS_LONGITUDE, sizeof(int32_t));
+    // Bytes 21-52: Comment
+    memcpy(&State[21], gEeprom.APRS_COMMENT, 32);
+
+    EEPROM_WriteBuffer(0x0E98, State);  // Use new EEPROM space for APRS
+}
+
+void SETTINGS_LoadAPRS(void)
+{
+    uint8_t State[64];  // Reduced size for simplified APRS settings
+
+    memset(State, 0xFF, sizeof(State));
+    EEPROM_ReadBuffer(0x0E98, State, sizeof(State));
+
+    // Check if APRS data is valid:
+    // 1. Must not be all 0xFF (uninitialized)
+    // 2. Callsign must be valid (first character should be letter or number, not 0x00 or 0xFF)
+    bool is_valid = (State[0] != 0xFF);
+    // Check if callsign is valid (first char should be between '0'-'9' or 'A'-'Z')
+    if (is_valid) {
+        uint8_t first_char = State[2];  // First character of callsign
+        if (first_char < '0' || first_char > 'Z' || (first_char > '9' && first_char < 'A')) {
+            is_valid = false;  // Invalid callsign
+        }
+    }
+
+    if (is_valid) {
+        gEeprom.APRS_ON = (State[0] == 1);
+        gEeprom.APRS_INTERVAL = State[1];
+        memcpy(gEeprom.APRS_CALLSIGN, &State[2], 10);
+        gEeprom.APRS_CALLSIGN[9] = 0;  // Ensure null termination
+        gEeprom.APRS_SSID = State[12];
+        memcpy(&gEeprom.APRS_LATITUDE, &State[13], sizeof(int32_t));
+        memcpy(&gEeprom.APRS_LONGITUDE, &State[17], sizeof(int32_t));
+        memcpy(gEeprom.APRS_COMMENT, &State[21], 32);
+        gEeprom.APRS_COMMENT[31] = 0;  // Ensure null termination
+
+        // If callsign is empty or invalid, reset to defaults
+        if (gEeprom.APRS_CALLSIGN[0] < '0' || gEeprom.APRS_CALLSIGN[0] > 'Z') {
+            is_valid = false;
+        }
+    }
+
+    if (!is_valid) {
+        // Set defaults - Istanbul coordinates
+        gEeprom.APRS_ON = false;
+        gEeprom.APRS_INTERVAL = 10;  // 10 minutes
+        strcpy(gEeprom.APRS_CALLSIGN, "TA1JS");  // Your callsign
+        gEeprom.APRS_SSID = 7;  // Standard for handheld
+        // Istanbul: 41.0082°N, 28.9784°E
+        // Stored as integer millionths of degrees
+        gEeprom.APRS_LATITUDE = 41008200;   // 41.0082° N
+        gEeprom.APRS_LONGITUDE = 28978400;  // 28.9784° E
+        strcpy(gEeprom.APRS_COMMENT, "UV-K5 Custom Firmware");
+
+        // Save the defaults to EEPROM
+        SETTINGS_SaveAPRS();
+    }
+}
+#endif
 
 void SETTINGS_SaveSettings(void)
 {

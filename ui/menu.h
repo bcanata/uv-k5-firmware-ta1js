@@ -159,6 +159,17 @@ enum
     MENU_F2LONG,
     MENU_MLONG,
     MENU_BATTYP
+#ifdef ENABLE_APRS
+    ,
+    MENU_APRS_ON,
+    MENU_APRS_INTV,
+    MENU_APRS_CALL,
+    MENU_APRS_SSID,
+    MENU_APRS_LAT,
+    MENU_APRS_LON,
+    MENU_APRS_CMNT,
+    MENU_APRS_TX
+#endif
 };
 
 extern const uint8_t FIRST_HIDDEN_MENU_ITEM;
@@ -224,8 +235,11 @@ extern uint8_t           gMenuCursor;
 
 extern int32_t           gSubMenuSelection;
                          
-extern char              edit_original[17];
-extern char              edit[17];
+// Shared edit buffers used by the menu system (also referenced from app/menu.c).
+// Needs to be large enough for the longest editable field (APRS comment: 31 chars + NUL).
+#define UI_MENU_EDIT_BUF_LEN 40
+extern char              edit_original[UI_MENU_EDIT_BUF_LEN];
+extern char              edit[UI_MENU_EDIT_BUF_LEN];
 extern int               edit_index;
 
 void UI_DisplayMenu(void);

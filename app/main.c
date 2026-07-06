@@ -293,6 +293,7 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
             break;
 
         case KEY_SIDE1:
+        {
             uint8_t a = FREQUENCY_GetSortedIdxFromStepIdx(gTxVfo->STEP_SETTING);
             if (a < STEP_N_ELEM - 1)
             {
@@ -305,7 +306,9 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
             gVfoConfigureMode     = VFO_CONFIGURE;
             gWasFKeyPressed = false;
             break;
+        }
         case KEY_SIDE2:
+        {
             uint8_t b = FREQUENCY_GetSortedIdxFromStepIdx(gTxVfo->STEP_SETTING);
             if (b > 0)
             {
@@ -317,6 +320,8 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
             }
             gVfoConfigureMode     = VFO_CONFIGURE;
             gWasFKeyPressed = false;
+            break;
+        }
             break;
 #endif
 

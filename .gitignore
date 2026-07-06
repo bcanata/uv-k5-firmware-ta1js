@@ -7,8 +7,11 @@ firmware
 .cache
 compile_commands.json
 .vscode
-/docs
+/docs/*
+!/docs/bk4819/
 k5_eeprom.raw
+.DS_Store
+K5TOOL.log*
 f4hwn
 f4hwn.*
 !archive/f4hwn*

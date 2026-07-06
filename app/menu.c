@@ -15,6 +15,8 @@
  */
 
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #if !defined(ENABLE_OVERLAY)
     #include "ARMCM0.h"
@@ -23,6 +25,9 @@
 #include "app/generic.h"
 #include "app/menu.h"
 #include "app/scanner.h"
+#ifdef ENABLE_APRS
+    #include "aprs_minimal.h"
+#endif
 #include "audio.h"
 #include "board.h"
 #include "bsp/dp32g030/gpio.h"
@@ -372,6 +377,19 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
             *pMax = 2;
             break;
 
+#ifdef ENABLE_APRS
+        case MENU_APRS_ON:
+        case MENU_APRS_TX:
+            *pMax = 1;  // OFF/ON
+            break;
+        case MENU_APRS_INTV:
+            *pMin = 1;
+            *pMax = 60;  // 1-60 minutes
+            break;
+        case MENU_APRS_SSID:
+            *pMax = 15;  // SSID 0-15
+            break;
+#endif
         case MENU_F1SHRT:
         case MENU_F1LONG:
         case MENU_F2SHRT:
@@ -893,6 +911,95 @@ void MENU_AcceptSetting(void)
             gEeprom.BATTERY_TYPE = gSubMenuSelection;
             break;
 
+#ifdef ENABLE_APRS
+        case MENU_APRS_ON:
+            gEeprom.APRS_ON = gSubMenuSelection;
+            break;
+        case MENU_APRS_INTV:
+            gEeprom.APRS_INTERVAL = gSubMenuSelection;
+            break;
+        case MENU_APRS_CALL:
+            // Sanitize callsign: A-Z/0-9, stop at '_' padding or space.
+            {
+                uint8_t o = 0;
+                for (uint8_t i = 0; i < 9 && o < 9; i++) {
+                    char c = edit[i];
+                    if (c == '_' || c == ' ' || c == 0)
+                        break;
+                    if (c >= 'a' && c <= 'z')
+                        c -= 32;
+                    if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')) {
+                        gEeprom.APRS_CALLSIGN[o++] = c;
+                    }
+                }
+                gEeprom.APRS_CALLSIGN[o] = 0;
+            }
+            break;
+        case MENU_APRS_SSID:
+            gEeprom.APRS_SSID = gSubMenuSelection;
+            break;
+        case MENU_APRS_LAT:
+            // Parse latitude from edit string - integer millionths of degrees
+            // Format: DDMM.MM (APRS-style, no N/S here)
+            // Example: 4045.12 = 40°45.12' = 40752000 millionths
+            {
+#define DIG(c) (((c) >= '0' && (c) <= '9') ? ((c) - '0') : 0)
+                int32_t deg  = (DIG(edit[0]) * 10) + DIG(edit[1]);
+                int32_t min  = (DIG(edit[2]) * 10) + DIG(edit[3]);
+                int32_t hund = (DIG(edit[5]) * 10) + DIG(edit[6]); // skip '.'
+#undef DIG
+
+                if (deg > 90) deg = 90;
+                if (min > 59) min = 59;
+                if (hund > 99) hund = 99;
+
+                gEeprom.APRS_LATITUDE =
+                    (deg * 1000000) +
+                    (min * 1000000) / 60 +
+                    (hund * 1000) / 6; // (hund/100 minutes) / 60 degrees => millionths
+            }
+            break;
+        case MENU_APRS_LON:
+            // Parse longitude from edit string - integer millionths of degrees
+            // Format: DDDMM.MM (APRS-style, no E/W here)
+            {
+#define DIG(c) (((c) >= '0' && (c) <= '9') ? ((c) - '0') : 0)
+                int32_t deg  = (DIG(edit[0]) * 100) + (DIG(edit[1]) * 10) + DIG(edit[2]);
+                int32_t min  = (DIG(edit[3]) * 10) + DIG(edit[4]);
+                int32_t hund = (DIG(edit[6]) * 10) + DIG(edit[7]); // skip '.'
+#undef DIG
+
+                if (deg > 180) deg = 180;
+                if (min > 59)  min = 59;
+                if (hund > 99) hund = 99;
+
+                gEeprom.APRS_LONGITUDE =
+                    (deg * 1000000) +
+                    (min * 1000000) / 60 +
+                    (hund * 1000) / 6;
+            }
+            break;
+        case MENU_APRS_CMNT:
+            // Copy + trim, limit to 31 chars.
+            {
+                uint8_t len = 0;
+                for (; len < 31 && edit[len] != 0; len++) {
+                    gEeprom.APRS_COMMENT[len] = edit[len];
+                }
+                while (len > 0 && gEeprom.APRS_COMMENT[len - 1] == ' ')
+                    len--;
+                gEeprom.APRS_COMMENT[len] = 0;
+            }
+            break;
+        case MENU_APRS_TX:
+            // Trigger manual transmission (toggle behavior)
+            if (gSubMenuSelection == 1) {
+                APRS_TransmitNow();
+                // Don't reset immediately - let user see TX triggered
+                // Menu will exit after transmission
+            }
+            break;
+#endif
         case MENU_F1SHRT:
         case MENU_F1LONG:
         case MENU_F2SHRT:
@@ -1275,7 +1382,66 @@ void MENU_ShowCurrentSetting(void)
                 break;
     #endif
 #endif
-                
+
+#ifdef ENABLE_APRS
+        case MENU_APRS_ON:
+            gSubMenuSelection = gEeprom.APRS_ON;
+            break;
+        case MENU_APRS_INTV:
+            gSubMenuSelection = gEeprom.APRS_INTERVAL;
+            break;
+        case MENU_APRS_CALL:
+            strcpy(edit, gEeprom.APRS_CALLSIGN);
+            break;
+        case MENU_APRS_SSID:
+            gSubMenuSelection = gEeprom.APRS_SSID;
+            break;
+        case MENU_APRS_LAT:
+            // Format latitude for editing as DDMM.MM
+            {
+                int32_t lat = (gEeprom.APRS_LATITUDE < 0) ? -gEeprom.APRS_LATITUDE : gEeprom.APRS_LATITUDE;
+                const int32_t deg = lat / 1000000;
+                const int32_t rem = lat % 1000000;
+                const int32_t minutes_x100 = (rem * 6) / 1000;
+                const int32_t min  = minutes_x100 / 100;
+                const int32_t hund = minutes_x100 % 100;
+                edit[0] = '0' + ((deg / 10) % 10);
+                edit[1] = '0' + (deg % 10);
+                edit[2] = '0' + ((min / 10) % 10);
+                edit[3] = '0' + (min % 10);
+                edit[4] = '.';
+                edit[5] = '0' + ((hund / 10) % 10);
+                edit[6] = '0' + (hund % 10);
+                edit[7] = 0;
+            }
+            break;
+        case MENU_APRS_LON:
+            // Format longitude for editing as DDDMM.MM
+            {
+                int32_t lon = (gEeprom.APRS_LONGITUDE < 0) ? -gEeprom.APRS_LONGITUDE : gEeprom.APRS_LONGITUDE;
+                const int32_t deg = lon / 1000000;
+                const int32_t rem = lon % 1000000;
+                const int32_t minutes_x100 = (rem * 6) / 1000;
+                const int32_t min  = minutes_x100 / 100;
+                const int32_t hund = minutes_x100 % 100;
+                edit[0] = '0' + ((deg / 100) % 10);
+                edit[1] = '0' + ((deg / 10) % 10);
+                edit[2] = '0' + (deg % 10);
+                edit[3] = '0' + ((min / 10) % 10);
+                edit[4] = '0' + (min % 10);
+                edit[5] = '.';
+                edit[6] = '0' + ((hund / 10) % 10);
+                edit[7] = '0' + (hund % 10);
+                edit[8] = 0;
+            }
+            break;
+        case MENU_APRS_CMNT:
+            strcpy(edit, gEeprom.APRS_COMMENT);
+            break;
+        case MENU_APRS_TX:
+            gSubMenuSelection = 0;  // Always start at OFF
+            break;
+#endif
         #ifdef ENABLE_NOAA
             case MENU_NOAA_S:
                 gSubMenuSelection = gEeprom.NOAA_AUTO_SCAN;
@@ -1455,6 +1621,41 @@ static void MENU_Key_0_to_9(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 
         return;
     }
+
+#ifdef ENABLE_APRS
+    if (gIsInSubMenu && edit_index >= 0 && Key <= KEY_9 &&
+        (UI_MENU_GetCurrentMenuId() == MENU_APRS_CALL ||
+         UI_MENU_GetCurrentMenuId() == MENU_APRS_LAT ||
+         UI_MENU_GetCurrentMenuId() == MENU_APRS_LON ||
+         UI_MENU_GetCurrentMenuId() == MENU_APRS_CMNT))
+    {
+        const int menu_id = UI_MENU_GetCurrentMenuId();
+        int max_len = 9;
+        int dot_pos = -1;
+        if (menu_id == MENU_APRS_LAT) { max_len = 7; dot_pos = 4; }
+        else if (menu_id == MENU_APRS_LON) { max_len = 8; dot_pos = 5; }
+        else if (menu_id == MENU_APRS_CMNT) max_len = 31;
+
+        if (edit_index < max_len)
+        {
+            if (edit_index == dot_pos)
+                edit_index++;
+            if (edit_index < max_len)
+            {
+                edit[edit_index] = '0' + (Key - KEY_0);
+
+                // advance cursor, but don't auto-exit edit mode
+                if (++edit_index == dot_pos)
+                    edit_index++;
+                if (edit_index >= max_len)
+                    edit_index = max_len - 1;
+
+                gRequestDisplayScreen = DISPLAY_MENU;
+            }
+        }
+        return;
+    }
+#endif
 
     INPUTBOX_Append(Key);
 
@@ -1731,6 +1932,96 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
         }
     }
 
+#ifdef ENABLE_APRS
+    // APRS string field editing
+    if (UI_MENU_GetCurrentMenuId() == MENU_APRS_CALL ||
+        UI_MENU_GetCurrentMenuId() == MENU_APRS_LAT ||
+        UI_MENU_GetCurrentMenuId() == MENU_APRS_LON ||
+        UI_MENU_GetCurrentMenuId() == MENU_APRS_CMNT)
+    {
+        if (edit_index < 0)
+        {   // enter APRS string edit mode
+            memset(edit, 0, sizeof(edit));
+            // Load current value into edit buffer
+            switch (UI_MENU_GetCurrentMenuId())
+            {
+                case MENU_APRS_CALL:
+                    strcpy(edit, gEeprom.APRS_CALLSIGN);
+                    edit_index = strlen(edit);
+                    while (edit_index < 9)
+                        edit[edit_index++] = '_';
+                    break;
+                case MENU_APRS_LAT:
+                    // Format current latitude for editing
+                    {
+                        const int32_t lat = (gEeprom.APRS_LATITUDE < 0) ? -gEeprom.APRS_LATITUDE : gEeprom.APRS_LATITUDE;
+                        const int32_t deg = lat / 1000000;
+                        const int32_t rem = lat % 1000000;
+                        const int32_t minutes_x100 = (rem * 6) / 1000;
+                        const int32_t min  = minutes_x100 / 100;
+                        const int32_t hund = minutes_x100 % 100;
+                        sprintf(edit, "%02ld%02ld.%02ld", (long)deg, (long)min, (long)hund);
+                        edit_index = strlen(edit);
+                    }
+                    break;
+                case MENU_APRS_LON:
+                    // Format current longitude for editing
+                    {
+                        const int32_t lon = (gEeprom.APRS_LONGITUDE < 0) ? -gEeprom.APRS_LONGITUDE : gEeprom.APRS_LONGITUDE;
+                        const int32_t deg = lon / 1000000;
+                        const int32_t rem = lon % 1000000;
+                        const int32_t minutes_x100 = (rem * 6) / 1000;
+                        const int32_t min  = minutes_x100 / 100;
+                        const int32_t hund = minutes_x100 % 100;
+                        sprintf(edit, "%03ld%02ld.%02ld", (long)deg, (long)min, (long)hund);
+                        edit_index = strlen(edit);
+                    }
+                    break;
+                case MENU_APRS_CMNT:
+                    strcpy(edit, gEeprom.APRS_COMMENT);
+                    edit_index = strlen(edit);
+                    while (edit_index < 31)
+                        edit[edit_index++] = ' ';
+                    break;
+            }
+            edit[edit_index] = 0;
+            edit_index = 0;  // cursor position
+
+            // Save original for comparison
+            memcpy(edit_original, edit, sizeof(edit_original));
+
+            return;
+        }
+        else
+        {   // editing APRS string fields
+            int max_len = 9;
+            int dot_pos = -1;
+            if (UI_MENU_GetCurrentMenuId() == MENU_APRS_LAT) max_len = 7;
+            else if (UI_MENU_GetCurrentMenuId() == MENU_APRS_LON) max_len = 8;
+            else if (UI_MENU_GetCurrentMenuId() == MENU_APRS_CMNT) max_len = 31;
+
+            if (edit_index >= 0 && edit_index < max_len)
+            {
+                if (UI_MENU_GetCurrentMenuId() == MENU_APRS_LAT) dot_pos = 4;
+                else if (UI_MENU_GetCurrentMenuId() == MENU_APRS_LON) dot_pos = 5;
+
+                if (++edit_index == dot_pos)
+                    edit_index++;
+
+                if (edit_index < max_len)
+                    return; // next char
+
+                // exit edit mode
+                gFlagAcceptSetting  = true;
+                gAskForConfirmation = 0;
+                gIsInSubMenu       = false;
+                edit_index         = -1;
+                return;
+            }
+        }
+    }
+#endif
+
     // exiting the sub menu
 
     if (gIsInSubMenu)
@@ -1738,7 +2029,14 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
         if (UI_MENU_GetCurrentMenuId() == MENU_RESET  ||
             UI_MENU_GetCurrentMenuId() == MENU_MEM_CH ||
             UI_MENU_GetCurrentMenuId() == MENU_DEL_CH ||
-            UI_MENU_GetCurrentMenuId() == MENU_MEM_NAME)
+            UI_MENU_GetCurrentMenuId() == MENU_MEM_NAME
+#ifdef ENABLE_APRS
+            || UI_MENU_GetCurrentMenuId() == MENU_APRS_CALL
+            || UI_MENU_GetCurrentMenuId() == MENU_APRS_LAT
+            || UI_MENU_GetCurrentMenuId() == MENU_APRS_LON
+            || UI_MENU_GetCurrentMenuId() == MENU_APRS_CMNT
+#endif
+            )
         {
             switch (gAskForConfirmation)
             {
@@ -1817,6 +2115,25 @@ static void MENU_Key_STAR(const bool bKeyPressed, const bool bKeyHeld)
         return;
     }
 
+#ifdef ENABLE_APRS
+    if (gIsInSubMenu && edit_index >= 0 &&
+        (UI_MENU_GetCurrentMenuId() == MENU_APRS_CALL ||
+         UI_MENU_GetCurrentMenuId() == MENU_APRS_CMNT))
+    {
+        const int menu_id = UI_MENU_GetCurrentMenuId();
+        const int max_len = (menu_id == MENU_APRS_CALL) ? 9 : 31;
+
+        if (edit_index < max_len)
+        {
+            edit[edit_index] = (menu_id == MENU_APRS_CMNT) ? '-' : ' ';
+            if (++edit_index >= max_len)
+                edit_index = max_len - 1;
+            gRequestDisplayScreen = DISPLAY_MENU;
+        }
+        return;
+    }
+#endif
+
     RADIO_SelectVfos();
 
     #ifdef ENABLE_NOAA
@@ -1867,6 +2184,81 @@ static void MENU_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
         }
         return;
     }
+
+#ifdef ENABLE_APRS
+    if (gIsInSubMenu && edit_index >= 0 && Direction != 0 &&
+        (UI_MENU_GetCurrentMenuId() == MENU_APRS_CALL ||
+         UI_MENU_GetCurrentMenuId() == MENU_APRS_LAT ||
+         UI_MENU_GetCurrentMenuId() == MENU_APRS_LON ||
+         UI_MENU_GetCurrentMenuId() == MENU_APRS_CMNT))
+    {
+        const int menu_id = UI_MENU_GetCurrentMenuId();
+        int max_len = 9;
+        int dot_pos = -1;
+
+        if (menu_id == MENU_APRS_LAT) { max_len = 7; dot_pos = 4; }
+        else if (menu_id == MENU_APRS_LON) { max_len = 8; dot_pos = 5; }
+        else if (menu_id == MENU_APRS_CMNT) max_len = 31;
+
+        if (!bKeyPressed || edit_index >= max_len)
+            return;
+
+        if (edit_index == dot_pos) {
+            // Auto-skip the dot.
+            edit_index++;
+            if (edit_index >= max_len)
+                return;
+        }
+
+        if (menu_id == MENU_APRS_LAT || menu_id == MENU_APRS_LON)
+        {   // numeric fields: change digit with wrap-around
+            char c = edit[edit_index];
+            int digit = (c >= '0' && c <= '9') ? (c - '0') : 0;
+            int max_digit = 9;
+
+            // Limit minutes tens digit to 0..5 (DDMM.MM / DDDMM.MM).
+            if ((menu_id == MENU_APRS_LAT && edit_index == 2) ||
+                (menu_id == MENU_APRS_LON && edit_index == 3))
+            {
+                max_digit = 5;
+            }
+
+            digit += Direction;
+            if (digit < 0) digit = max_digit;
+            if (digit > max_digit) digit = 0;
+            edit[edit_index] = '0' + digit;
+        }
+        else if (menu_id == MENU_APRS_CALL)
+        {   // callsign: cycle through a restricted charset
+            const char *allowed = " _0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            char c = edit[edit_index];
+            if (c == 0) c = ' ';
+            if (c >= 'a' && c <= 'z') c -= 32;
+            if (c == '_') c = ' ';
+
+            int idx = 0;
+            while (allowed[idx] && allowed[idx] != c) idx++;
+            if (!allowed[idx]) idx = 0;
+            idx += Direction;
+            const int len = (int)strlen(allowed);
+            if (idx < 0) idx = len - 1;
+            if (idx >= len) idx = 0;
+            edit[edit_index] = allowed[idx];
+        }
+        else
+        {   // comment: general ASCII cycling
+            char c = edit[edit_index];
+            if (c == 0) c = ' ';
+            c = (char)(c + Direction);
+            if (c < 32) c = 126;
+            if (c > 126) c = 32;
+            edit[edit_index] = c;
+        }
+
+        gRequestDisplayScreen = DISPLAY_MENU;
+        return;
+    }
+#endif
 
     if (!bKeyHeld)
     {
@@ -1988,19 +2380,26 @@ void MENU_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
             MENU_Key_STAR(bKeyPressed, bKeyHeld);
             break;
         case KEY_F:
-            if (UI_MENU_GetCurrentMenuId() == MENU_MEM_NAME && edit_index >= 0)
+            if ((UI_MENU_GetCurrentMenuId() == MENU_MEM_NAME
+#ifdef ENABLE_APRS
+                 || UI_MENU_GetCurrentMenuId() == MENU_APRS_CALL
+                 || UI_MENU_GetCurrentMenuId() == MENU_APRS_CMNT
+#endif
+                ) && edit_index >= 0)
             {   // currently editing the channel name
                 if (!bKeyHeld && bKeyPressed)
                 {
                     gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
-                    if (edit_index < 10)
+                    int max_len = 10;
+#ifdef ENABLE_APRS
+                    if (UI_MENU_GetCurrentMenuId() == MENU_APRS_CALL) max_len = 9;
+                    else if (UI_MENU_GetCurrentMenuId() == MENU_APRS_CMNT) max_len = 31;
+#endif
+                    if (edit_index < max_len)
                     {
                         edit[edit_index] = ' ';
-                        if (++edit_index >= 10)
-                        {   // exit edit
-                            gFlagAcceptSetting  = false;
-                            gAskForConfirmation = 1;
-                        }
+                        if (++edit_index >= max_len)
+                            edit_index = max_len - 1;
                         gRequestDisplayScreen = DISPLAY_MENU;
                     }
                 }

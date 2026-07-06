@@ -164,6 +164,17 @@ const t_menu_item MenuList[] =
     {"SetNWR",      MENU_NOAA_S    },
 #endif
 #endif
+#ifdef ENABLE_APRS
+    // APRS menu items
+    {"APRS",    MENU_APRS_ON        },
+    {"Intv",    MENU_APRS_INTV      },
+    {"Call",    MENU_APRS_CALL      },
+    {"SSID",    MENU_APRS_SSID      },
+    {"Lat",     MENU_APRS_LAT       },
+    {"Lon",     MENU_APRS_LON       },
+    {"Cmnt",    MENU_APRS_CMNT      },
+    {"TX",      MENU_APRS_TX        },
+#endif
     // hidden menu items from here on
     // enabled if pressing both the PTT and upper side button at power-on
     {"F Lock",      MENU_F_LOCK        },
@@ -489,8 +500,8 @@ uint8_t UI_MENU_GetMenuIdx(uint8_t id)
 int32_t gSubMenuSelection;
 
 // edit box
-char    edit_original[17]; // a copy of the text before editing so that we can easily test for changes/difference
-char    edit[17];
+char    edit_original[UI_MENU_EDIT_BUF_LEN]; // copy before editing so we can test for changes/difference
+char    edit[UI_MENU_EDIT_BUF_LEN];
 int     edit_index;
 
 void UI_DisplayMenu(void)
@@ -1168,8 +1179,67 @@ void UI_DisplayMenu(void)
         #ifdef ENABLE_FEAT_F4HWN_RESCUE_OPS
             case MENU_SET_KEY:
                 strcpy(String, gSubMenu_SET_KEY[gSubMenuSelection]);
-                break;                
+                break;
         #endif
+#endif
+
+#ifdef ENABLE_APRS
+        case MENU_APRS_ON:
+        case MENU_APRS_TX:
+            strcpy(String, gSubMenu_OFF_ON[gSubMenuSelection]);
+            break;
+        case MENU_APRS_INTV:
+            sprintf(String, "%d min", gSubMenuSelection);
+            break;
+        case MENU_APRS_CALL:
+            // Display callsign from edit array
+            if (gIsInSubMenu && edit_index >= 0) {
+                sprintf(String, "%-9s", edit);
+            } else {
+                sprintf(String, "%-9s", gEeprom.APRS_CALLSIGN);
+            }
+            break;
+        case MENU_APRS_SSID:
+            sprintf(String, "%d", gSubMenuSelection);
+            break;
+        case MENU_APRS_LAT:
+            // Display latitude from edit array
+            if (gIsInSubMenu && edit_index >= 0) {
+                sprintf(String, "%-7s", edit);
+            } else {
+                // Stored as integer millionths of degrees, display as APRS-friendly DDMM.MM
+                const int32_t lat = (gEeprom.APRS_LATITUDE < 0) ? -gEeprom.APRS_LATITUDE : gEeprom.APRS_LATITUDE;
+                const int32_t deg = lat / 1000000;
+                const int32_t rem = lat % 1000000;
+                const int32_t minutes_x100 = (rem * 6) / 1000; // minutes * 100 (0..5999)
+                const int32_t min  = minutes_x100 / 100;
+                const int32_t hund = minutes_x100 % 100;
+                sprintf(String, "%02ld%02ld.%02ld", (long)deg, (long)min, (long)hund);
+            }
+            break;
+        case MENU_APRS_LON:
+            // Display longitude from edit array
+            if (gIsInSubMenu && edit_index >= 0) {
+                sprintf(String, "%-8s", edit);
+            } else {
+                // Stored as integer millionths of degrees, display as APRS-friendly DDDMM.MM
+                const int32_t lon = (gEeprom.APRS_LONGITUDE < 0) ? -gEeprom.APRS_LONGITUDE : gEeprom.APRS_LONGITUDE;
+                const int32_t deg = lon / 1000000;
+                const int32_t rem = lon % 1000000;
+                const int32_t minutes_x100 = (rem * 6) / 1000; // minutes * 100 (0..5999)
+                const int32_t min  = minutes_x100 / 100;
+                const int32_t hund = minutes_x100 % 100;
+                sprintf(String, "%03ld%02ld.%02ld", (long)deg, (long)min, (long)hund);
+            }
+            break;
+        case MENU_APRS_CMNT:
+            // Display comment from edit array
+            if (gIsInSubMenu && edit_index >= 0) {
+                sprintf(String, "%-10.10s", edit);
+            } else {
+                sprintf(String, "%-10.10s", gEeprom.APRS_COMMENT);
+            }
+            break;
 #endif
 
     }
