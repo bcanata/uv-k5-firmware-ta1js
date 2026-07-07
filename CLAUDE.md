@@ -8,7 +8,7 @@ Custom firmware for the Quansheng UV-K5/K6/5R handheld radios — a fork of F4HW
 
 - **TX** — position beacons; digipeated by YM3KZD, igated by YM1KTC-11, seen on aprs.fi.
 - **RX** — decodes packets off the air (uncompressed, Mic-E, base-91 compressed) and shows the position on screen.
-- **Messaging** — send/receive APRS text messages; an incoming message addressed to your callsign pops a framed overlay box over any screen, dismissed by any key.
+- **Messaging** — send/receive APRS text messages; an incoming message addressed to your callsign pops a framed overlay box across the bottom half of the screen (covering the B-VFO column), auto-clearing after 30 s or dismissed early by any key.
 - **PC control** — send beacon/message and monitor decoded traffic over USB (`utils/aprs_pc.py`).
 - **Config** — callsign/SSID/location/message-target persist in EEPROM; location is entered as a 15-digit code produced by `utils/aprs-location.html` (phone GPS → code).
 
@@ -25,7 +25,7 @@ make ENABLE_APRS=0            # plain radio, no APRS
 - `ENABLE_AMATEUR_BAND_ONLY` defaults to **1** (VFO/TX limited to Turkish amateur allocations; see below). Set `=0` to remove.
 - User-facing docs: `docs/APRS.md`. Companion web tools live in the separate repo published at `bcanata.github.io/uv-k5-aprs-beacon` (source also in `utils/`).
 - **Release safety:** a fresh/reset radio defaults to callsign `N0CALL`, location 0/0, and **refuses to transmit** until a real callsign is set (`APRS_Configured()` gates every TX path). Never re-introduce a personal callsign as the default.
-- Output: `f4hwn` (ELF), `f4hwn.bin` (raw, what the flasher needs), `f4hwn.packed.bin` (needs python `crcmod`; if pip is blocked by PEP 668, use a venv and run `python fw-pack.py f4hwn.bin F4HWN v4.3 f4hwn.packed.bin`).
+- Output: `f4hwn` (ELF), `f4hwn.bin` (raw, what the flasher needs), `f4hwn.packed.bin` (needs python `crcmod`; if pip is blocked by PEP 668, use a venv and run `python fw-pack.py f4hwn.bin TA1JS v1.0 f4hwn.packed.bin`).
 - Docker build also available: `./compile-with-docker.sh <edition>` → `compiled-firmware/`.
 - If make fails with "No rule to make target .../printf_config.h" after the repo was moved, delete stale `*.d` files (they hold absolute paths).
 
@@ -46,7 +46,7 @@ brew install --cask wch-ch34x-usb-serial-driver   # approve cn.wch.CH34xVCPDrive
 The adapter then appears as `/dev/cu.wchusbserial110` / `wchusbserial1110` (suffix follows the USB port). Flash with the pyserial-based flasher in this repo (K5TOOL's V2 bootloader protocol ported to Python):
 
 ```bash
-python utils/k5flash.py /dev/cu.wchusbserial1110 f4hwn.bin '*F4HWN v4.3'
+python utils/k5flash.py /dev/cu.wchusbserial1110 f4hwn.bin '*TA1JS v1.0'
 ```
 
 - Takes the **raw** `f4hwn.bin` (not packed). The version string must start with `*` (wildcard bypasses the bootloader version check).
@@ -99,7 +99,7 @@ Three RX gotchas, all fixed and easy to regress:
 
 ### Messaging
 
-`:ADDRESSEE:text` frames. An incoming message whose addressee matches this radio's callsign-SSID sets `gAPRS_RxSticky` and is drawn as a framed overlay box in `GUI_DisplayScreen` (`ui/ui.c`) over whatever screen is showing; **any key dismisses it** (`APRS_DismissMessage` in `ProcessKey`, PTT passes through so it still keys up). Compose via menu MsgTo + Msg + Send.
+`:ADDRESSEE:text` frames. An incoming message whose addressee matches this radio's callsign-SSID sets `gAPRS_RxSticky` (plus a 30 s `gAPRS_RxDisplayTimer`) and is drawn by `UI_DrawAPRSMessageBox` (`ui/ui.c`, called from `GUI_DisplayScreen`) as a framed overlay box filling the **bottom half of the screen** (frame rows 3–6), which completely hides the B-VFO/MR column (rows 4–6). It **auto-clears when the timer expires** — `APRS_Task` drops the sticky flag and requests a redraw, so `UI_DisplayMain` repaints VFO B — or **any key dismisses it early** (`APRS_DismissMessage` in `ProcessKey`, PTT passes through so it still keys up). The box wipes full-width, draws its top edge at bit0 of row 3 and bottom edge at bit7 of row 6 (bit7 is unused by the small font, so it never clips text), and vertically centres up to 3 lines of 16 chars in rows 4–6. Compose via menu MsgTo + Msg + Send.
 
 ### Text entry (menu string fields)
 
