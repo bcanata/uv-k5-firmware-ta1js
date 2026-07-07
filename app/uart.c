@@ -40,6 +40,13 @@
 #include "misc.h"
 #include "settings.h"
 #include "version.h"
+#ifdef ENABLE_UART_RC
+    #include "app/app.h"          // APP_InjectKey (pulls radio.h / functions.h)
+    #include "driver/keyboard.h"  // KEY_Code_t
+    #include "driver/st7565.h"    // gStatusLine / gFrameBuffer for the display mirror
+    #include "helper/battery.h"   // gBatteryVoltageAverage
+    #include "ui/ui.h"            // gScreenToDisplay
+#endif
 
 #if defined(ENABLE_OVERLAY)
     #include "sram-overlay.h"
@@ -636,6 +643,140 @@ static void CMD_APRS_Send(const uint8_t *pBuffer, bool beacon)
 }
 #endif
 
+#ifdef ENABLE_UART_RC
+// ---- Radio remote control: key injection, state, TX helpers, display mirror ----
+
+// 0x0B01: inject a key event.  Data = { Key, Flags } (bit0 pressed, bit1 held).
+typedef struct {
+    Header_t Header;
+    uint8_t  Key;
+    uint8_t  Flags;
+} CMD_0B01_t;
+
+// 0x0B81: generic ACK for the key / set commands.
+typedef struct {
+    Header_t Header;
+    uint16_t Command;
+    uint8_t  Result;
+    uint8_t  Padding;
+} REPLY_0B81_t;
+
+// 0x0B82: reply to 0x0B02 (get state).
+typedef struct {
+    Header_t Header;
+    uint8_t  TxVfo;
+    uint8_t  Screen;
+    uint8_t  Function;
+    uint8_t  IsTransmit;
+    uint32_t RxFrequency;   // 10 Hz units
+    uint32_t TxFrequency;   // 10 Hz units
+    uint8_t  Modulation;    // 0 FM, 1 AM, 2 USB
+    uint8_t  Bandwidth;     // 0 wide, 1 narrow
+    uint8_t  Power;         // OUTPUT_POWER_*
+    uint8_t  Channel;
+    uint8_t  Squelch;
+    uint8_t  Padding;
+    uint16_t Rssi;
+    uint16_t BatteryMv;
+} REPLY_0B82_t;
+
+// 0x0B03/04/05: single-byte setter payload.
+typedef struct {
+    Header_t Header;
+    uint8_t  Value;
+} CMD_0Bset_t;
+
+static void RC_Ack(uint16_t cmd, uint8_t ok)
+{
+    REPLY_0B81_t Reply;
+    Reply.Header.ID   = 0x0B81;
+    Reply.Header.Size = sizeof(Reply) - sizeof(Header_t);
+    Reply.Command     = cmd;
+    Reply.Result      = ok;
+    Reply.Padding     = 0;
+    SendReply(&Reply, sizeof(Reply));
+}
+
+static void CMD_0B01_InjectKey(const uint8_t *pBuffer)
+{
+    const CMD_0B01_t *pCmd = (const CMD_0B01_t *)pBuffer;
+    if (pCmd->Key > KEY_SIDE1) { RC_Ack(0x0B01, 0); return; }
+    APP_InjectKey((KEY_Code_t)pCmd->Key,
+                  (pCmd->Flags & 1u) ? true : false,
+                  (pCmd->Flags & 2u) ? true : false);
+    RC_Ack(0x0B01, 1);
+}
+
+static void CMD_0B02_GetState(void)
+{
+    REPLY_0B82_t Reply;
+    VFO_Info_t *vfo = gCurrentVfo ? gCurrentVfo : gTxVfo;
+
+    memset(&Reply, 0, sizeof(Reply));
+    Reply.Header.ID   = 0x0B82;
+    Reply.Header.Size = sizeof(Reply) - sizeof(Header_t);
+    Reply.TxVfo       = gEeprom.TX_VFO;
+    Reply.Screen      = (uint8_t)gScreenToDisplay;
+    Reply.Function    = (uint8_t)gCurrentFunction;
+    Reply.IsTransmit  = (gCurrentFunction == FUNCTION_TRANSMIT) ? 1 : 0;
+    if (vfo != NULL) {
+        Reply.RxFrequency = (vfo->pRX != NULL) ? vfo->pRX->Frequency : 0;
+        Reply.TxFrequency = (vfo->pTX != NULL) ? vfo->pTX->Frequency : 0;
+        Reply.Modulation  = (uint8_t)vfo->Modulation;
+        Reply.Bandwidth   = vfo->CHANNEL_BANDWIDTH;
+        Reply.Power       = vfo->OUTPUT_POWER;
+        Reply.Channel     = vfo->CHANNEL_SAVE;
+    }
+    Reply.Squelch   = gEeprom.SQUELCH_LEVEL;
+    Reply.Rssi      = BK4819_GetRSSI();
+    Reply.BatteryMv = (uint16_t)(gBatteryVoltageAverage * 10u); // centivolts -> mV
+    SendReply(&Reply, sizeof(Reply));
+}
+
+static void CMD_0B03_SetPower(const uint8_t *pBuffer)
+{
+    const CMD_0Bset_t *pCmd = (const CMD_0Bset_t *)pBuffer;
+    if (pCmd->Value > OUTPUT_POWER_HIGH || gTxVfo == NULL) { RC_Ack(0x0B03, 0); return; }
+    gTxVfo->OUTPUT_POWER = pCmd->Value;
+    RADIO_ConfigureSquelchAndOutputPower(gTxVfo);
+    RADIO_SetupRegisters(true);
+    gRequestSaveChannel = 1;
+    RC_Ack(0x0B03, 1);
+}
+
+static void CMD_0B04_SetBandwidth(const uint8_t *pBuffer)
+{
+    const CMD_0Bset_t *pCmd = (const CMD_0Bset_t *)pBuffer;
+    if (pCmd->Value > 1 || gTxVfo == NULL) { RC_Ack(0x0B04, 0); return; }
+    gTxVfo->CHANNEL_BANDWIDTH = pCmd->Value;
+    RADIO_SetupRegisters(true);
+    gRequestSaveChannel = 1;
+    RC_Ack(0x0B04, 1);
+}
+
+static void CMD_0B05_SetModulation(const uint8_t *pBuffer)
+{
+    const CMD_0Bset_t *pCmd = (const CMD_0Bset_t *)pBuffer;
+    if (pCmd->Value >= MODULATION_UKNOWN || gTxVfo == NULL) { RC_Ack(0x0B05, 0); return; }
+    gTxVfo->Modulation = (ModulationMode_t)pCmd->Value;
+    RADIO_SetupRegisters(true);
+    gRequestSaveChannel = 1;
+    RC_Ack(0x0B05, 1);
+}
+
+// 0x0A03: push one raw display frame.  Marker 0xAB 0xED then the live 1024-byte
+// paged framebuffer (gStatusLine = page 0, gFrameBuffer = pages 1..7).  Runs
+// inside the IRQ-disabled command handler, so the buffers are stable.  Not
+// obfuscated / not CRC-framed -- the host reads it as a raw push (see the spec).
+static void CMD_0A03_Screen(void)
+{
+    static const uint8_t marker[2] = { 0xAB, 0xED };
+    UART_Send(marker, sizeof(marker));
+    UART_Send(gStatusLine, LCD_WIDTH);                 // 128 bytes
+    UART_Send(gFrameBuffer, FRAME_LINES * LCD_WIDTH);  // 896 bytes
+}
+#endif  // ENABLE_UART_RC
+
 void UART_HandleCommand(void)
 {
     switch (UART_Command.Header.ID)
@@ -689,6 +830,32 @@ void UART_HandleCommand(void)
 
         case 0x0704:
             CMD_APRS_BeaconAt(UART_Command.Buffer);
+            break;
+#endif
+
+#ifdef ENABLE_UART_RC
+        case 0x0A03:
+            CMD_0A03_Screen();
+            break;
+
+        case 0x0B01:
+            CMD_0B01_InjectKey(UART_Command.Buffer);
+            break;
+
+        case 0x0B02:
+            CMD_0B02_GetState();
+            break;
+
+        case 0x0B03:
+            CMD_0B03_SetPower(UART_Command.Buffer);
+            break;
+
+        case 0x0B04:
+            CMD_0B04_SetBandwidth(UART_Command.Buffer);
+            break;
+
+        case 0x0B05:
+            CMD_0B05_SetModulation(UART_Command.Buffer);
             break;
 #endif
 

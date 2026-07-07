@@ -49,6 +49,8 @@ ENABLE_APRS                     ?= 1
 ENABLE_REGA                     ?= 0
 # Thank you @reppad
 ENABLE_EXTRA_UART_CMD           ?= 0
+# Radio remote control over UART: key injection, get-state, TX power/bw/mod, display mirror
+ENABLE_UART_RC                  ?= 1
 
 # ---- F4HWN MODS ----
 
@@ -254,9 +256,9 @@ ifeq ($(ENABLE_FEAT_F4HWN),1)
 	VERSION_STRING_1 ?= v0.22
 
 	AUTHOR_STRING_2 ?= TA1JS
-	VERSION_STRING_2 ?= v1.0
+	VERSION_STRING_2 ?= v1.1
 
-	EDITION_STRING ?= Custom
+	EDITION_STRING ?= APRS
 
 	# Edition branding = the edition maintainer only. The full lineage
 	# (Dual Tachyon → OneOfEleven/fagci → egzumer → F4HWN) is credited where
@@ -454,6 +456,9 @@ ifeq ($(ENABLE_FLASHLIGHT),1)
 endif
 ifeq ($(ENABLE_UART_RW_BK_REGS),1)
 	CFLAGS  += -DENABLE_UART_RW_BK_REGS
+endif
+ifeq ($(ENABLE_UART_RC),1)
+	CFLAGS  += -DENABLE_UART_RC
 endif
 ifeq ($(ENABLE_CUSTOM_MENU_LAYOUT),1)
 	CFLAGS  += -DENABLE_CUSTOM_MENU_LAYOUT

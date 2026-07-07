@@ -31,5 +31,10 @@ void     APP_Update(void);
 void     APP_TimeSlice10ms(void);
 void     APP_TimeSlice500ms(void);
 
+#ifdef ENABLE_UART_RC
+#include "driver/keyboard.h"
+void     APP_InjectKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
+#endif
+
 #endif
 

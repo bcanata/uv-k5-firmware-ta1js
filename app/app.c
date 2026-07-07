@@ -1855,6 +1855,15 @@ static void ALARM_Off(void)
 }
 #endif
 
+#ifdef ENABLE_UART_RC
+// Public entry point for UART remote control: inject a synthetic key event so
+// it runs the exact same path as a physical keypress (see CheckKeys()).
+void APP_InjectKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
+{
+    ProcessKey(Key, bKeyPressed, bKeyHeld);
+}
+#endif
+
 static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
 #ifdef ENABLE_APRS
