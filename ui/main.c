@@ -19,6 +19,9 @@
 
 #include "app/chFrScanner.h"
 #include "app/dtmf.h"
+#ifdef ENABLE_APRS
+    #include "app/aprs_minimal.h"
+#endif
 #ifdef ENABLE_AM_FIX
     #include "am_fix.h"
 #endif
@@ -1390,6 +1393,15 @@ void UI_DisplayMain(void)
     {   // we're free to use the middle line
 
         const bool rx = FUNCTION_IsRx();
+
+#ifdef ENABLE_APRS
+        if (gAPRS_RxDisplay[0] != 0 && !gAPRS_RxSticky)
+        {   // last decoded APRS packet (messages get the overlay box instead)
+            center_line = CENTER_LINE_DTMF_DEC;
+            UI_PrintStringSmallNormal(gAPRS_RxDisplay, 2, 0, 3);
+        }
+        else
+#endif
 
 #ifdef ENABLE_AUDIO_BAR
         if (gSetting_mic_bar && gCurrentFunction == FUNCTION_TRANSMIT) {

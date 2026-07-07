@@ -598,79 +598,73 @@ void SETTINGS_SaveVfoIndices(void)
 }
 
 #ifdef ENABLE_APRS
+// APRS settings are stored in two 16-byte EEPROM rows that are unused across
+// the whole tree and outside every reset-protected range: 0x0E30 and 0x0F20.
+// EEPROM_WriteBuffer only ever burns 8 bytes, so each region is two rows.
+// Logical 32-byte layout (region A = bytes 0..15 @0x0E30, B = 16..31 @0x0F20):
+//   [0]ON [1]INTV [2]SSID [3..9]CALL(7) [10..13]LAT | [16..19]LON [20..29]MSGTO(10)
+// The freeform message text and beacon comment are not persisted (no room);
+// they revert to their defaults on boot.
+#define APRS_EE_A 0x0E30
+#define APRS_EE_B 0x0F20
+
+extern char gAPRS_MsgTo[10];
+extern char gAPRS_MsgText[31];
+
 void SETTINGS_SaveAPRS(void)
 {
-    uint8_t State[96];  // Increased to accommodate all APRS settings
-
+    uint8_t State[32];
     memset(State, 0xFF, sizeof(State));
 
-    // Byte 0: APRS enable flag
     State[0] = gEeprom.APRS_ON ? 1 : 0;
-    // Byte 1: Beacon interval (minutes)
     State[1] = gEeprom.APRS_INTERVAL;
-    // Bytes 2-11: Callsign
-    memcpy(&State[2], gEeprom.APRS_CALLSIGN, 10);
-    // Byte 12: SSID
-    State[12] = gEeprom.APRS_SSID;
-    // Bytes 13-16: Latitude (int32_t millionths of degrees)
-    memcpy(&State[13], &gEeprom.APRS_LATITUDE, sizeof(int32_t));
-    // Bytes 17-20: Longitude (int32_t millionths of degrees)
-    memcpy(&State[17], &gEeprom.APRS_LONGITUDE, sizeof(int32_t));
-    // Bytes 21-52: Comment
-    memcpy(&State[21], gEeprom.APRS_COMMENT, 32);
+    State[2] = gEeprom.APRS_SSID;
+    memcpy(&State[3],  gEeprom.APRS_CALLSIGN, 7);
+    memcpy(&State[10], &gEeprom.APRS_LATITUDE,  sizeof(int32_t));
+    memcpy(&State[16], &gEeprom.APRS_LONGITUDE, sizeof(int32_t));
+    memcpy(&State[20], gAPRS_MsgTo, 10);
 
-    EEPROM_WriteBuffer(0x0E98, State);  // Use new EEPROM space for APRS
+    EEPROM_WriteBuffer(APRS_EE_A + 0, &State[0]);
+    EEPROM_WriteBuffer(APRS_EE_A + 8, &State[8]);
+    EEPROM_WriteBuffer(APRS_EE_B + 0, &State[16]);
+    EEPROM_WriteBuffer(APRS_EE_B + 8, &State[24]);
 }
 
 void SETTINGS_LoadAPRS(void)
 {
-    uint8_t State[64];  // Reduced size for simplified APRS settings
+    uint8_t State[32];
+    EEPROM_ReadBuffer(APRS_EE_A, &State[0],  16);
+    EEPROM_ReadBuffer(APRS_EE_B, &State[16], 16);
 
-    memset(State, 0xFF, sizeof(State));
-    EEPROM_ReadBuffer(0x0E98, State, sizeof(State));
+    // valid if the first callsign character is 0-9 or A-Z
+    const uint8_t c0 = State[3];
+    bool is_valid = (State[0] != 0xFF) &&
+                    ((c0 >= '0' && c0 <= '9') || (c0 >= 'A' && c0 <= 'Z'));
 
-    // Check if APRS data is valid:
-    // 1. Must not be all 0xFF (uninitialized)
-    // 2. Callsign must be valid (first character should be letter or number, not 0x00 or 0xFF)
-    bool is_valid = (State[0] != 0xFF);
-    // Check if callsign is valid (first char should be between '0'-'9' or 'A'-'Z')
-    if (is_valid) {
-        uint8_t first_char = State[2];  // First character of callsign
-        if (first_char < '0' || first_char > 'Z' || (first_char > '9' && first_char < 'A')) {
-            is_valid = false;  // Invalid callsign
-        }
-    }
+    // comment + message text are never persisted; start from defaults
+    strcpy(gEeprom.APRS_COMMENT, "UV-K5 APRS");
+    gAPRS_MsgText[0] = 0;
 
     if (is_valid) {
-        gEeprom.APRS_ON = (State[0] == 1);
+        gEeprom.APRS_ON       = (State[0] == 1);
         gEeprom.APRS_INTERVAL = State[1];
-        memcpy(gEeprom.APRS_CALLSIGN, &State[2], 10);
-        gEeprom.APRS_CALLSIGN[9] = 0;  // Ensure null termination
-        gEeprom.APRS_SSID = State[12];
-        memcpy(&gEeprom.APRS_LATITUDE, &State[13], sizeof(int32_t));
-        memcpy(&gEeprom.APRS_LONGITUDE, &State[17], sizeof(int32_t));
-        memcpy(gEeprom.APRS_COMMENT, &State[21], 32);
-        gEeprom.APRS_COMMENT[31] = 0;  // Ensure null termination
-
-        // If callsign is empty or invalid, reset to defaults
-        if (gEeprom.APRS_CALLSIGN[0] < '0' || gEeprom.APRS_CALLSIGN[0] > 'Z') {
-            is_valid = false;
-        }
-    }
-
-    if (!is_valid) {
-        // Set defaults - Istanbul coordinates
-        gEeprom.APRS_ON = false;
-        gEeprom.APRS_INTERVAL = 10;  // 10 minutes
-        strcpy(gEeprom.APRS_CALLSIGN, "TA1JS");  // Your callsign
-        gEeprom.APRS_SSID = 7;  // Standard for handheld
-        // Istanbul: 41.0082°N, 28.9784°E
-        // Stored as integer millionths of degrees
-        gEeprom.APRS_LATITUDE = 41008200;   // 41.0082° N
-        gEeprom.APRS_LONGITUDE = 28978400;  // 28.9784° E
-        strcpy(gEeprom.APRS_COMMENT, "UV-K5 Custom Firmware");
-
-        // Save the defaults to EEPROM
+        gEeprom.APRS_SSID     = State[2] & 0x0F;
+        memcpy(gEeprom.APRS_CALLSIGN, &State[3], 7);
+        gEeprom.APRS_CALLSIGN[6] = 0;
+        memcpy(&gEeprom.APRS_LATITUDE,  &State[10], sizeof(int32_t));
+        memcpy(&gEeprom.APRS_LONGITUDE, &State[16], sizeof(int32_t));
+        memcpy(gAPRS_MsgTo, &State[20], 10);
+        gAPRS_MsgTo[9] = 0;
+        if ((uint8_t)gAPRS_MsgTo[0] == 0xFF)
+            gAPRS_MsgTo[0] = 0;
+    } else {
+        gEeprom.APRS_ON        = false;
+        gEeprom.APRS_INTERVAL  = 10;
+        strcpy(gEeprom.APRS_CALLSIGN, "TA1JS");
+        gEeprom.APRS_SSID      = 0;
+        gEeprom.APRS_LATITUDE  = 40993293;   // 40.993293 N
+        gEeprom.APRS_LONGITUDE = 27599608;   // 27.599608 E
+        gAPRS_MsgTo[0]         = 0;
         SETTINGS_SaveAPRS();
     }
 }

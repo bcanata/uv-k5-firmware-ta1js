@@ -688,6 +688,11 @@ static void CheckRadioInterrupts(void)
 
         interrupts.__raw = BK4819_ReadRegister(BK4819_REG_02);
 
+#ifdef ENABLE_APRS
+        if (gEeprom.APRS_ON)
+            APRS_HandleRxInterrupts(interrupts.__raw);
+#endif
+
         // 0 = no phase shift
         // 1 = 120deg phase shift
         // 2 = 180deg phase shift
@@ -1084,6 +1089,9 @@ void APP_Update(void)
 #endif
 #ifdef ENABLE_NOAA
             || (gIsNoaaMode && (IS_NOAA_CHANNEL(gEeprom.ScreenChannel[0]) || IS_NOAA_CHANNEL(gEeprom.ScreenChannel[1])))
+#endif
+#ifdef ENABLE_APRS
+            || gEeprom.APRS_ON  // FSK RX capture cannot survive the sleep cycle
 #endif
         ) {
             gBatterySaveCountdown_10ms = battery_save_count_10ms;
@@ -1612,9 +1620,11 @@ void APP_TimeSlice500ms(void)
     }
 
 #ifdef ENABLE_APRS
-    // APRS beacon task
+    // APRS task: RX listen upkeep + TX cooldown
     if (gEeprom.APRS_ON) {
         APRS_Task();
+    } else {
+        APRS_StopListening();
     }
 #endif
 
@@ -1847,6 +1857,13 @@ static void ALARM_Off(void)
 
 static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
+#ifdef ENABLE_APRS
+    if (bKeyPressed && !bKeyHeld && APRS_DismissMessage()) {
+        if (Key != KEY_PTT)
+            return;  // key consumed by closing the message box (PTT passes through)
+    }
+#endif
+
     #ifdef ENABLE_FEAT_F4HWN_SLEEP
     if(gWakeUp)
     {

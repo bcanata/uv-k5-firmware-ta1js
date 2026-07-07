@@ -23,6 +23,9 @@
     #include "app/fm.h"
 #endif
 #include "app/uart.h"
+#ifdef ENABLE_APRS
+    #include "app/aprs_minimal.h"
+#endif
 #include "board.h"
 #include "bsp/dp32g030/dma.h"
 #include "bsp/dp32g030/gpio.h"
@@ -577,6 +580,41 @@ bool UART_IsCommandAvailable(void)
     return (CRC_Calculate(UART_Command.Buffer, Size) != CRC) ? false : true;
 }
 
+#ifdef ENABLE_APRS
+// 0x0700: send an APRS message.  Data = dest[10] + text[30] (both NUL-padded).
+typedef struct {
+    Header_t Header;
+    char     Dest[10];
+    char     Text[30];
+} CMD_0700_t;
+
+// 0x0702: transmit a position beacon (no payload).
+typedef struct {
+    Header_t Header;
+    uint8_t  Ok;
+    uint8_t  Padding[3];
+} REPLY_ack_t;
+
+static void CMD_APRS_Send(const uint8_t *pBuffer, bool beacon)
+{
+    REPLY_ack_t Reply;
+
+    if (!beacon) {
+        const CMD_0700_t *pCmd = (const CMD_0700_t *)pBuffer;
+        memcpy(gAPRS_MsgTo,   pCmd->Dest, 9);  gAPRS_MsgTo[9]   = 0;
+        memcpy(gAPRS_MsgText, pCmd->Text, 30); gAPRS_MsgText[30] = 0;
+        APRS_SendMessage();
+    } else {
+        APRS_TransmitNow();
+    }
+
+    Reply.Header.ID   = beacon ? 0x0703 : 0x0701;
+    Reply.Header.Size = sizeof(Reply) - sizeof(Header_t);
+    Reply.Ok          = 1;
+    SendReply(&Reply, sizeof(Reply));
+}
+#endif
+
 void UART_HandleCommand(void)
 {
     switch (UART_Command.Header.ID)
@@ -619,6 +657,16 @@ void UART_HandleCommand(void)
             break;
 #endif
     
+#ifdef ENABLE_APRS
+        case 0x0700:
+            CMD_APRS_Send(UART_Command.Buffer, false);
+            break;
+
+        case 0x0702:
+            CMD_APRS_Send(UART_Command.Buffer, true);
+            break;
+#endif
+
         case 0x05DD: // reset
             #if defined(ENABLE_OVERLAY)
                 overlay_FLASH_RebootToBootloader();

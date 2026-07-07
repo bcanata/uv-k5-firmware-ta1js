@@ -12,6 +12,8 @@ compile_commands.json
 k5_eeprom.raw
 .DS_Store
 K5TOOL.log*
+/backups/
+eeprom-*.raw
 f4hwn
 f4hwn.*
 !archive/f4hwn*

@@ -112,7 +112,13 @@ void BATTERY_GetReadings(const bool bDisplayBatteryLevel)
 
     gBatteryVoltageAverage = (Voltage * 760) / gBatteryCalibration[3];
 
-    if(gBatteryVoltageAverage > 890)
+    if(gBatteryVoltageAverage >= 1100 && gBatteryVoltageAverage <= 1200)
+        // Programming-cable back-feed reads ~11.55V and spuriously trips the
+        // over-voltage TX lockout. Treat only this narrow band as a normal
+        // full battery so TX works while cabled; a genuine over-voltage
+        // (e.g. a 3S pack ~12.6V) is outside the band and still caught below.
+        gBatteryDisplayLevel = 6;
+    else if(gBatteryVoltageAverage > 890)
         gBatteryDisplayLevel = 7; // battery overvoltage
     else if(gBatteryVoltageAverage < 630 && (gEeprom.BATTERY_TYPE == BATTERY_TYPE_1600_MAH || gEeprom.BATTERY_TYPE == BATTERY_TYPE_2200_MAH))
         gBatteryDisplayLevel = 0; // battery critical

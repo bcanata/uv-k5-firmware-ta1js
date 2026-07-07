@@ -18,6 +18,9 @@
 #include <stdlib.h>
 
 #include "../app/dtmf.h"
+#ifdef ENABLE_APRS
+    #include "../app/aprs_minimal.h"
+#endif
 #include "../app/menu.h"
 #include "../bitmaps.h"
 #include "../board.h"
@@ -170,9 +173,11 @@ const t_menu_item MenuList[] =
     {"Intv",    MENU_APRS_INTV      },
     {"Call",    MENU_APRS_CALL      },
     {"SSID",    MENU_APRS_SSID      },
-    {"Lat",     MENU_APRS_LAT       },
-    {"Lon",     MENU_APRS_LON       },
+    {"Loc",     MENU_APRS_LOC       },
     {"Cmnt",    MENU_APRS_CMNT      },
+    {"MsgTo",   MENU_APRS_MSGTO     },
+    {"Msg",     MENU_APRS_MSGTXT    },
+    {"Send",    MENU_APRS_MSGSND    },
     {"TX",      MENU_APRS_TX        },
 #endif
     // hidden menu items from here on
@@ -1186,7 +1191,20 @@ void UI_DisplayMenu(void)
 #ifdef ENABLE_APRS
         case MENU_APRS_ON:
         case MENU_APRS_TX:
+        case MENU_APRS_MSGSND:
             strcpy(String, gSubMenu_OFF_ON[gSubMenuSelection]);
+            break;
+        case MENU_APRS_MSGTO:
+            if (gIsInSubMenu && edit_index >= 0)
+                sprintf(String, "%-9s", edit);
+            else
+                sprintf(String, "%-9s", gAPRS_MsgTo);
+            break;
+        case MENU_APRS_MSGTXT:
+            if (gIsInSubMenu && edit_index >= 0)
+                sprintf(String, "%-10.10s", edit);
+            else
+                sprintf(String, "%-10.10s", gAPRS_MsgText);
             break;
         case MENU_APRS_INTV:
             sprintf(String, "%d min", gSubMenuSelection);
@@ -1202,35 +1220,11 @@ void UI_DisplayMenu(void)
         case MENU_APRS_SSID:
             sprintf(String, "%d", gSubMenuSelection);
             break;
-        case MENU_APRS_LAT:
-            // Display latitude from edit array
-            if (gIsInSubMenu && edit_index >= 0) {
-                sprintf(String, "%-7s", edit);
-            } else {
-                // Stored as integer millionths of degrees, display as APRS-friendly DDMM.MM
-                const int32_t lat = (gEeprom.APRS_LATITUDE < 0) ? -gEeprom.APRS_LATITUDE : gEeprom.APRS_LATITUDE;
-                const int32_t deg = lat / 1000000;
-                const int32_t rem = lat % 1000000;
-                const int32_t minutes_x100 = (rem * 6) / 1000; // minutes * 100 (0..5999)
-                const int32_t min  = minutes_x100 / 100;
-                const int32_t hund = minutes_x100 % 100;
-                sprintf(String, "%02ld%02ld.%02ld", (long)deg, (long)min, (long)hund);
-            }
-            break;
-        case MENU_APRS_LON:
-            // Display longitude from edit array
-            if (gIsInSubMenu && edit_index >= 0) {
-                sprintf(String, "%-8s", edit);
-            } else {
-                // Stored as integer millionths of degrees, display as APRS-friendly DDDMM.MM
-                const int32_t lon = (gEeprom.APRS_LONGITUDE < 0) ? -gEeprom.APRS_LONGITUDE : gEeprom.APRS_LONGITUDE;
-                const int32_t deg = lon / 1000000;
-                const int32_t rem = lon % 1000000;
-                const int32_t minutes_x100 = (rem * 6) / 1000; // minutes * 100 (0..5999)
-                const int32_t min  = minutes_x100 / 100;
-                const int32_t hund = minutes_x100 % 100;
-                sprintf(String, "%03ld%02ld.%02ld", (long)deg, (long)min, (long)hund);
-            }
+        case MENU_APRS_LOC:
+            if (gIsInSubMenu && edit_index >= 0)
+                sprintf(String, "%.5s-\n%.5s-\n%.5s", edit, edit + 5, edit + 10);
+            else
+                APRS_FormatLatLon(String);
             break;
         case MENU_APRS_CMNT:
             // Display comment from edit array

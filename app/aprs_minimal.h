@@ -38,4 +38,22 @@ void APRS_Task(void);
 // Check if APRS is currently transmitting
 bool APRS_IsTransmitting(void);
 
+// RX listen mode (active while the APRS menu item is ON)
+void APRS_HandleRxInterrupts(uint16_t interrupt_bits);
+void APRS_StopListening(void);
+
+// Messaging
+void APRS_SendMessage(void);
+bool APRS_DismissMessage(void);
+
+// "41.15N 27.84E" for the Loc menu display
+void APRS_FormatLatLon(char *out);
+extern char gAPRS_MsgTo[10];
+extern char gAPRS_MsgText[31];
+
+// Last decoded packet, shown on the main screen while non-empty
+extern char    gAPRS_RxDisplay[44];
+extern uint8_t gAPRS_RxDisplayTimer;
+extern bool    gAPRS_RxSticky;
+
 #endif // APP_APRS_MINIMAL_H

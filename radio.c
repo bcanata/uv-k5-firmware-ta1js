@@ -865,6 +865,13 @@ void RADIO_SetupRegisters(bool switchToForeground)
 
     RADIO_SetupAGC(gRxVfo->Modulation == MODULATION_AM, false);
 
+#ifdef ENABLE_APRS
+    if (gEeprom.APRS_ON)
+        InterruptMask |= BK4819_REG_3F_FSK_RX_FINISHED
+                       | BK4819_REG_3F_FSK_FIFO_ALMOST_FULL
+                       | BK4819_REG_3F_FSK_RX_SYNC;
+#endif
+
     // enable/disable BK4819 selected interrupts
     BK4819_WriteRegister(BK4819_REG_3F, InterruptMask);
 

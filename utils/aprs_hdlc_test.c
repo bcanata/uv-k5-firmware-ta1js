@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 // ---- copied from firmware ----
@@ -63,6 +64,121 @@ static void AX25_EncodeAddress(const char *callsign, uint8_t ssid, bool last, ui
         out7[i] = (uint8_t)(c << 1);
     }
     out7[6] = (uint8_t)(0x60 | ((ssid & 0x0F) << 1) | (last ? 0x01 : 0x00));
+}
+
+// ---- position parsers (verbatim copies from app/aprs_minimal.c) ----
+static uint8_t MIN100_TO_MICRO(uint32_t deg, uint32_t min100, int32_t *out)
+{
+    if (deg > 180u || min100 >= 6000u)
+        return 0;
+    *out = (int32_t)(deg * 1000000u + (min100 * 500u) / 3u);
+    return 1;
+}
+
+static uint8_t APRS_ParseUncompressed(const uint8_t *p, uint16_t len, int32_t *lat, int32_t *lon)
+{
+    if (len < 19)
+        return 0;
+    const uint8_t *q = p;
+    uint32_t latd, latm;
+    uint32_t lond, lonm;
+    #define DIGIT(c) (((c) == ' ') ? 0u : (uint32_t)((c) - '0'))
+    #define ISDIG(c) (((c) >= '0' && (c) <= '9') || (c) == ' ')
+    if (!ISDIG(q[0]) || !ISDIG(q[1]) || !ISDIG(q[2]) || !ISDIG(q[3]) ||
+        q[4] != '.' || !ISDIG(q[5]) || !ISDIG(q[6]))
+        return 0;
+    latd = DIGIT(q[0]) * 10u + DIGIT(q[1]);
+    latm = DIGIT(q[2]) * 1000u + DIGIT(q[3]) * 100u + DIGIT(q[5]) * 10u + DIGIT(q[6]);
+    if (!MIN100_TO_MICRO(latd, latm, lat))
+        return 0;
+    if (q[7] == 'S')
+        *lat = -*lat;
+    else if (q[7] != 'N')
+        return 0;
+    q += 9;
+    if (!ISDIG(q[0]) || !ISDIG(q[1]) || !ISDIG(q[2]) || !ISDIG(q[3]) ||
+        !ISDIG(q[4]) || q[5] != '.' || !ISDIG(q[6]) || !ISDIG(q[7]))
+        return 0;
+    lond = DIGIT(q[0]) * 100u + DIGIT(q[1]) * 10u + DIGIT(q[2]);
+    lonm = DIGIT(q[3]) * 1000u + DIGIT(q[4]) * 100u + DIGIT(q[6]) * 10u + DIGIT(q[7]);
+    if (!MIN100_TO_MICRO(lond, lonm, lon))
+        return 0;
+    if (q[8] == 'W')
+        *lon = -*lon;
+    else if (q[8] != 'E')
+        return 0;
+    #undef DIGIT
+    #undef ISDIG
+    return 1;
+}
+
+static uint8_t APRS_ParseMicE(const uint8_t *frame, const uint8_t *info, uint16_t ilen, int32_t *lat, int32_t *lon)
+{
+    const uint8_t t = info[0];
+    if (t != 0x60 && t != 0x27 && t != 0x1C && t != 0x1D)
+        return 0;
+    if (ilen < 9)
+        return 0;
+    uint8_t  dig[6], bit[6];
+    for (uint8_t i = 0; i < 6; i++) {
+        const char c = (char)(frame[i] >> 1);
+        if (c >= '0' && c <= '9')      { dig[i] = (uint8_t)(c - '0'); bit[i] = 0; }
+        else if (c >= 'A' && c <= 'J') { dig[i] = (uint8_t)(c - 'A'); bit[i] = 1; }
+        else if (c >= 'P' && c <= 'Y') { dig[i] = (uint8_t)(c - 'P'); bit[i] = 1; }
+        else if (c == 'L')             { dig[i] = 0; bit[i] = 0; }
+        else if (c == 'K' || c == 'Z') { dig[i] = 0; bit[i] = 1; }
+        else return 0;
+    }
+    const uint32_t latd = (uint32_t)dig[0] * 10u + dig[1];
+    const uint32_t latm = (uint32_t)dig[2] * 1000u + (uint32_t)dig[3] * 100u
+                        + (uint32_t)dig[4] * 10u + dig[5];
+    if (latd > 90u || !MIN100_TO_MICRO(latd, latm, lat))
+        return 0;
+    if (!bit[3])
+        *lat = -*lat;
+    int32_t d = (int32_t)info[1] - 28;
+    int32_t m = (int32_t)info[2] - 28;
+    int32_t h = (int32_t)info[3] - 28;
+    if (d < 0 || m < 0 || h < 0 || h > 99)
+        return 0;
+    if (bit[4])
+        d += 100;
+    if (d >= 180 && d <= 189) d -= 80;
+    else if (d >= 190 && d <= 199) d -= 190;
+    if (m >= 60)
+        m -= 60;
+    if (d > 179 || m > 59)
+        return 0;
+    if (!MIN100_TO_MICRO((uint32_t)d, (uint32_t)(m * 100 + h), lon))
+        return 0;
+    if (bit[5])
+        *lon = -*lon;
+    return 1;
+}
+
+static uint8_t APRS_ParseCompressed(const uint8_t *p, uint16_t len, int32_t *lat, int32_t *lon)
+{
+    if (len < 10)
+        return 0;
+    for (uint8_t i = 1; i <= 8; i++)
+        if (p[i] < '!' || p[i] > '{')
+            return 0;
+    uint32_t y = 0, x = 0;
+    for (uint8_t i = 1; i <= 4; i++)
+        y = y * 91u + (uint32_t)(p[i] - 33);
+    for (uint8_t i = 5; i <= 8; i++)
+        x = x * 91u + (uint32_t)(p[i] - 33);
+    {
+        const uint32_t dd = y / 380926u, rr = y % 380926u;
+        if (dd > 180u) return 0;
+        *lat = 90000000 - (int32_t)(dd * 1000000u + (rr * 21u) / 8u);
+    }
+    {
+        const uint32_t dd = x / 190463u, rr = x % 190463u;
+        if (dd > 360u) return 0;
+        *lon = -180000000 + (int32_t)(dd * 1000000u + (rr * 21u) / 4u);
+    }
+    return 1;
 }
 
 // ---- decoder (independent implementation, TNC-style) ----
@@ -173,5 +289,106 @@ int main(void)
               !memcmp(via, "WIDE1 ", 6) && !memcmp(via2, "WIDE2 ", 6) &&
               (rxframe[20] & 1) == 0 && (rxframe[27] & 1) == 1;
     printf(ok ? "ALL CHECKS PASSED\n" : "CHECKS FAILED\n");
-    return ok ? 0 : 1;
+    if (!ok) return 1;
+
+    // ---- phase 2: the firmware's streaming RX decoder (APRS_DecodeCapture copy) ----
+    // must recover the frame from a capture at any bit alignment and polarity
+    int rx_fail = 0;
+    for (int shift = 0; shift < 16; shift++) {
+        // simulate a capture: noise byte + stream shifted by 0..7 bits, optionally inverted
+        uint8_t cap[HDLC_BUF_SIZE + 2];
+        int capbits = 8 + (int)w.bits + (shift & 7);
+        memset(cap, 0, sizeof(cap));
+        cap[0] = 0x35;  // leading noise
+        for (uint32_t b = 0; b < w.bits; b++) {
+            int pos = 8 + (shift & 7) + (int)b;
+            uint8_t level = (hdlcbuf[b >> 3] >> (7 - (b & 7))) & 1;
+            if (shift >= 8) level ^= 1;  // opposite NRZI polarity
+            if (level) cap[pos >> 3] |= 0x80 >> (pos & 7);
+        }
+        int capbytes = (capbits + 7) / 8;
+
+        // ---- verbatim logic from APRS_DecodeCapture ----
+        uint8_t  rxf[80];
+        uint8_t  prev2 = 0, ones2 = 0;
+        uint16_t nbits = 0xFFFF;
+        int found = 0;
+        memset(rxf, 0, sizeof(rxf));
+        for (uint32_t i = 0; i < (uint32_t)capbytes * 8u; i++) {
+            const uint8_t level = (cap[i >> 3] >> (7u - (i & 7u))) & 1u;
+            const uint8_t bit   = (level == prev2) ? 1u : 0u;
+            prev2 = level;
+            if (bit) {
+                if (ones2 < 7) ones2++;
+                if (ones2 >= 7) { nbits = 0xFFFF; continue; }
+                if (nbits != 0xFFFF) {
+                    if (nbits < sizeof(rxf) * 8u)
+                        rxf[nbits >> 3] |= (uint8_t)(1u << (nbits & 7u));
+                    nbits++;
+                }
+                continue;
+            }
+            if (ones2 == 5) { ones2 = 0; continue; }
+            if (ones2 == 6) {
+                if (nbits != 0xFFFF && nbits >= 7u) {
+                    const uint16_t fb = nbits - 7u;
+                    if ((fb & 7u) == 0 && fb >= 17u * 8u && (fb >> 3) <= sizeof(rxf)) {
+                        const uint16_t len = fb >> 3;
+                        const uint16_t f2 = AX25_CalculateFCS(rxf, len - 2u);
+                        if (f2 == (uint16_t)(rxf[len - 2] | (rxf[len - 1] << 8))) {
+                            if (len == idx && !memcmp(rxf, frame, idx)) found = 1;
+                            break;
+                        }
+                    }
+                }
+                memset(rxf, 0, sizeof(rxf));
+                nbits = 0; ones2 = 0;
+                continue;
+            }
+            if (nbits != 0xFFFF) {
+                if (nbits < sizeof(rxf) * 8u) nbits++;
+                else nbits = 0xFFFF;
+            }
+            ones2 = 0;
+        }
+        if (!found) { printf("RX decode FAIL at shift %d\n", shift); rx_fail = 1; }
+    }
+    printf(rx_fail ? "RX STREAMING DECODER FAILED\n" : "RX STREAMING DECODER PASSED (16 alignments/polarities)\n");
+    if (rx_fail) return 1;
+
+    // ---- phase 3: position parsers ----
+    int pfail = 0;
+    int32_t lat, lon;
+
+    // uncompressed: our own beacon text
+    if (!APRS_ParseUncompressed((const uint8_t *)"4059.60N/02735.98E>", 19, &lat, &lon) ||
+        lat != 40993333 || lon != 27599666) {
+        printf("uncompressed FAIL: %d %d\n", lat, lon);
+        pfail = 1;
+    }
+
+    // Mic-E: 33 deg 25.64' N, 112 deg 07.35' W (APRS 1.01 spec example values)
+    // dest "S32UVT" (digits 3,3,2,5,6,4; N=1, lon offset=1, W=1), AX.25-shifted
+    {
+        uint8_t dest[7];
+        const char *dc = "S32UVT";
+        for (int k = 0; k < 6; k++) dest[k] = (uint8_t)(dc[k] << 1);
+        dest[6] = 0x60;
+        const uint8_t micinfo[9] = { 0x60, 12 + 28, 7 + 28, 35 + 28, 'x', 'x', 'x', '/', '>' };
+        if (!APRS_ParseMicE(dest, micinfo, 9, &lat, &lon) ||
+            lat != 33427333 || lon != -112122500) {
+            printf("mic-e FAIL: %d %d\n", lat, lon);
+            pfail = 1;
+        }
+    }
+
+    // compressed: APRS 1.01 spec example "/5L!!<*e7>" = 49.5000N 72.7500W
+    if (!APRS_ParseCompressed((const uint8_t *)"/5L!!<*e7>{?!", 13, &lat, &lon) ||
+        abs(lat - 49500000) > 120 || abs(lon - -72750000) > 120) {
+        printf("compressed FAIL: %d %d\n", lat, lon);
+        pfail = 1;
+    }
+
+    printf(pfail ? "POSITION PARSERS FAILED\n" : "POSITION PARSERS PASSED (uncompressed, Mic-E, base-91)\n");
+    return pfail;
 }

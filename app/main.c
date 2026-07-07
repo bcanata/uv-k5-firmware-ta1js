@@ -24,6 +24,9 @@
     #include "app/fm.h"
 #endif
 #include "app/generic.h"
+#ifdef ENABLE_APRS
+    #include "app/aprs_minimal.h"
+#endif
 #include "app/main.h"
 #include "app/scanner.h"
 

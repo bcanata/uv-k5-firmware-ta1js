@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UV-K5 APRS Kod Aracı</title>
+<style>
+  :root {
+    --bg: #edf0ef;
+    --ink: #182024;
+    --muted: #5a6a70;
+    --line: #ccd4d2;
+    --accent: #c97a0a;
+    --accent-ink: #ffffff;
+    --field-bg: #ffffff;
+    --lcd-bg: #201d12;
+    --lcd-frame: #35301e;
+    --lcd-digit: #ffb020;
+    --lcd-dim: #8a7a45;
+    --warn: #a33f12;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131719;
+      --ink: #e8ecec;
+      --muted: #93a1a6;
+      --line: #2c3438;
+      --accent: #f0a020;
+      --accent-ink: #131719;
+      --field-bg: #1b2124;
+      --warn: #ff8a50;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #edf0ef; --ink: #182024; --muted: #5a6a70; --line: #ccd4d2;
+    --accent: #c97a0a; --accent-ink: #ffffff; --field-bg: #ffffff; --warn: #a33f12;
+  }
+  :root[data-theme="dark"] {
+    --bg: #131719; --ink: #e8ecec; --muted: #93a1a6; --line: #2c3438;
+    --accent: #f0a020; --accent-ink: #131719; --field-bg: #1b2124; --warn: #ff8a50;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    padding: 2rem 1.25rem 3rem;
+  }
+  .wrap { max-width: 26rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1.4rem; }
+  .eyebrow {
+    font: 600 0.72rem/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  h1 {
+    font: 700 1.6rem/1.2 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: -0.01em;
+    margin: 0.35rem 0 0;
+    text-wrap: balance;
+  }
+  h2 {
+    font: 700 0.85rem/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin: 0;
+    padding-top: 1.3rem;
+    border-top: 1px solid var(--line);
+  }
+  .lede { color: var(--muted); margin: 0.5rem 0 0; }
+  button#git {
+    display: block;
+    width: 100%;
+    padding: 0.95rem 1rem;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font: 700 0.95rem/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  button#git:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  button#git:disabled { opacity: 0.55; cursor: wait; }
+  .lcd {
+    background: var(--lcd-bg);
+    border: 1px solid var(--lcd-frame);
+    border-radius: 8px;
+    padding: 1rem 1rem 0.9rem;
+    display: none;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .lcd.on { display: flex; }
+  .lcd .label {
+    font: 600 0.68rem/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--lcd-dim);
+  }
+  .lcd .code {
+    font: 700 clamp(1.3rem, 7vw, 1.8rem)/1.45 ui-monospace, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.06em;
+    color: var(--lcd-digit);
+    word-spacing: 0.35em;
+    user-select: all;
+    -webkit-user-select: all;
+    overflow-wrap: break-word;
+  }
+  .lcd .meta {
+    font: 400 0.8rem/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--lcd-dim);
+    overflow-wrap: break-word;
+  }
+  .status { color: var(--muted); font-size: 0.9rem; min-height: 1.4em; margin: 0; }
+  .status.err { color: var(--warn); }
+  label.f {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font: 600 0.72rem/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  label.f input, label.f textarea {
+    font: 500 1.05rem/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+    background: var(--field-bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.6rem 0.7rem;
+    width: 100%;
+    box-sizing: border-box;
+    text-transform: uppercase;
+  }
+  label.f input:focus-visible, label.f textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  textarea { resize: none; }
+  ol.steps {
+    margin: 0;
+    padding: 1.25rem 0 0 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    color: var(--ink);
+    font-size: 0.92rem;
+    border-top: 1px solid var(--line);
+  }
+  ol.steps li::marker {
+    font: 700 0.85rem ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--accent);
+  }
+  ol.steps b { font-weight: 650; }
+  .fine {
+    color: var(--muted);
+    font-size: 0.78rem;
+    border-top: 1px solid var(--line);
+    padding-top: 1rem;
+    margin: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .lcd.on { animation: in 220ms ease-out; }
+    @keyframes in { from { opacity: 0; transform: translateY(4px); } }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">UV-K5 &middot; APRS SAHA ARACI</div>
+    <h1>Kod Aracı</h1>
+    <p class="lede">Konum, çağrı işareti ve mesajı telsizin tuş takımıyla girilecek rakam kodlarına çevirir.</p>
+  </header>
+
+  <h2>Konum &rarr; 73 Loc</h2>
+  <button id="git" type="button">Konumu Al</button>
+  <p class="status" id="durum" role="status"></p>
+  <section class="lcd" id="panel" aria-live="polite">
+    <div class="label">15 hane &middot; Menü 73 Loc</div>
+    <div class="code" id="kod"></div>
+    <div class="meta" id="meta"></div>
+  </section>
+
+  <h2>Metin &rarr; Call / MsgTo / Msg</h2>
+  <label class="f">Çağrı işareti (Call / MsgTo)
+    <input id="cagri" maxlength="9" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="TB1AAW">
+  </label>
+  <section class="lcd" id="cagriPanel">
+    <div class="label">Her karakter = 2 hane</div>
+    <div class="code" id="cagriKod"></div>
+    <div class="meta" id="cagriMeta"></div>
+  </section>
+
+  <label class="f">Mesaj (Msg / Cmnt) &mdash; en çok 30 karakter
+    <textarea id="mesaj" maxlength="30" rows="2" autocomplete="off" spellcheck="false" placeholder="QSL 73"></textarea>
+  </label>
+  <section class="lcd" id="mesajPanel">
+    <div class="label">Her karakter = 2 hane</div>
+    <div class="code" id="mesajKod"></div>
+    <div class="meta" id="mesajMeta"></div>
+  </section>
+
+  <ol class="steps">
+    <li>Kodu bu sayfadan üretin.</li>
+    <li>Telsizde ilgili menü alanına MENU ile girin.</li>
+    <li>Rakamları soldan sağa girin &mdash; metin alanlarında her <b>2 rakam</b> bir karaktere dönüşür, ekranda anında görürsünüz.</li>
+    <li><b>EXIT</b> = geri sil &middot; son karakterde <b>MENU</b> = kaydet.</li>
+  </ol>
+
+  <p class="fine">Karakter tablosu: 00&ndash;09 rakamlar, 10&ndash;35 A&ndash;Z, 36 boşluk, 37&ndash;45 noktalama (-./?!@:,'). Konum kodunun son hanesi kontrol hanesidir; hatalı kod telsizce reddedilir. Konum çözünürlüğü ~11&nbsp;m.</p>
+</div>
+
+<script>
+  var CS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ -./?!@:,'";
+
+  var btn = document.getElementById('git');
+  var durum = document.getElementById('durum');
+  var panel = document.getElementById('panel');
+  var kodEl = document.getElementById('kod');
+  var metaEl = document.getElementById('meta');
+
+  function kodYap(lat, lon) {
+    var la = Math.round((lat + 90) * 10000);
+    var lo = Math.round((lon + 180) * 10000);
+    if (la < 0 || la > 1800000 || lo < 0 || lo > 3600000) return null;
+    var ds = String(la).padStart(7, '0') + String(lo).padStart(7, '0');
+    var sum = 0;
+    for (var i = 0; i < 14; i++) sum += (i + 1) * Number(ds[i]);
+    return ds + String(sum % 10);
+  }
+
+  function goster(pos) {
+    var lat = pos.coords.latitude;
+    var lon = pos.coords.longitude;
+    var acc = Math.round(pos.coords.accuracy);
+    var kod = kodYap(lat, lon);
+    btn.disabled = false;
+    btn.textContent = 'Konumu Yenile';
+    if (!kod) {
+      durum.className = 'status err';
+      durum.textContent = 'Konum aralık dışında görünüyor, tekrar deneyin.';
+      return;
+    }
+    durum.className = 'status';
+    durum.textContent = '';
+    kodEl.textContent = kod.slice(0, 5) + ' ' + kod.slice(5, 10) + ' ' + kod.slice(10, 15);
+    metaEl.textContent = lat.toFixed(4) + '°  ' + lon.toFixed(4) + '°  (±' + acc + ' m)';
+    if (acc > 100) {
+      durum.className = 'status err';
+      durum.textContent = 'GPS hassasiyeti düşük (±' + acc + ' m). Açık alanda yenileyin.';
+    }
+    panel.classList.add('on');
+  }
+
+  function hata(e) {
+    btn.disabled = false;
+    btn.textContent = 'Tekrar Dene';
+    durum.className = 'status err';
+    if (e && e.code === 1)
+      durum.textContent = 'Konum izni reddedildi. Tarayıcı ayarlarından bu sayfaya konum izni verin.';
+    else if (e && e.code === 3)
+      durum.textContent = 'Konum alma zaman aşımına uğradı. Açık alanda tekrar deneyin.';
+    else
+      durum.textContent = 'Konum alınamadı. GPS açık mı?';
+  }
+
+  btn.addEventListener('click', function () {
+    if (!navigator.geolocation) {
+      durum.className = 'status err';
+      durum.textContent = 'Bu tarayıcı konum servisini desteklemiyor.';
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Aranıyor…';
+    durum.className = 'status';
+    durum.textContent = 'GPS bekleniyor…';
+    navigator.geolocation.getCurrentPosition(goster, hata, {
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 0
+    });
+  });
+
+  function metinKodla(girisId, panelId, kodId, metaId) {
+    var giris = document.getElementById(girisId);
+    var pan = document.getElementById(panelId);
+    var kodOut = document.getElementById(kodId);
+    var metaOut = document.getElementById(metaId);
+    giris.addEventListener('input', function () {
+      var t = giris.value.toUpperCase();
+      var pairs = [];
+      var temiz = '';
+      var atlandi = false;
+      for (var ch of t) {
+        var i = CS.indexOf(ch);
+        if (i < 0) { atlandi = true; continue; }
+        pairs.push(String(i).padStart(2, '0'));
+        temiz += ch;
+      }
+      if (pairs.length === 0) { pan.classList.remove('on'); return; }
+      kodOut.textContent = pairs.join(' ');
+      metaOut.textContent = temiz + (atlandi ? '  (desteklenmeyen karakterler atlandı)' : '');
+      pan.classList.add('on');
+    });
+  }
+  metinKodla('cagri', 'cagriPanel', 'cagriKod', 'cagriMeta');
+  metinKodla('mesaj', 'mesajPanel', 'mesajKod', 'mesajMeta');
+</script>
+</body>
+</html>
