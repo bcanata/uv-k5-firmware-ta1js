@@ -182,14 +182,59 @@ static uint8_t APRS_ParseCompressed(const uint8_t *p, uint16_t len, int32_t *lat
 }
 
 // ---- decoder (independent implementation, TNC-style) ----
+// Mirror of the third-party unwrap + addressee match in APRS_ShowFrame.
+// Takes the raw info field (bytes after the AX.25 addresses); on a "}"-prefixed
+// gated packet it re-points payload/paylen at the encapsulated info and reports
+// the true originator.  Returns 1 if the (unwrapped) payload is a message
+// addressed to mycall-myssid.
+static int TP_UnwrapAndMatch(const char *infostr, const char *mycall, int myssid,
+                             const char **payload, int *paylen, char *srcout)
+{
+    const uint8_t *ip = (const uint8_t *)infostr;
+    uint16_t ilen = (uint16_t)strlen(infostr);
+    const char *tpsrc = 0;
+    uint8_t     tpsrclen = 0;
+    if (ilen >= 2 && ip[0] == '}') {
+        uint16_t h = 1;
+        while (h < ilen && ip[h] != '>')  h++;
+        tpsrclen = (uint8_t)(h - 1);
+        while (h < ilen && ip[h] != ':')  h++;
+        if (tpsrclen > 0 && h + 1u < ilen && ip[h] == ':') {
+            tpsrc = (const char *)&ip[1];
+            ip    = &ip[h + 1u];
+            ilen  = (uint16_t)(ilen - (h + 1u));
+        }
+    }
+    srcout[0] = 0;
+    if (tpsrc) {
+        int n = tpsrclen > 9 ? 9 : tpsrclen;
+        memcpy(srcout, tpsrc, n);
+        srcout[n] = 0;
+    }
+    *payload = (const char *)ip;
+    *paylen  = (int)ilen;
+
+    int tome = 0;
+    if (ilen >= 11 && ip[0] == ':' && ip[10] == ':') {
+        char me[10];
+        int k = 0;
+        for (int i = 0; i < 6 && mycall[i] > ' '; i++) me[k++] = mycall[i];
+        if (myssid > 0) { me[k++] = '-'; if (myssid >= 10) me[k++] = '1'; me[k++] = (char)('0' + (myssid % 10)); }
+        int used = k;
+        while (k < 9) me[k++] = ' ';
+        tome = (used > 0 && memcmp(&ip[1], me, 9) == 0);
+    }
+    return tome;
+}
+
 int main(void)
 {
-    // Build the frame exactly like APRS_TransmitHardcoded_TA1JS
-    static const uint8_t INFO[] = "!4059.60N/02735.98E>UV-K5 APRS";
+    // Build the frame exactly like APRS_TransmitHardcoded_N0CALL
+    static const uint8_t INFO[] = "!1000.00N/02000.00E>UV-K5 APRS";
     uint8_t frame[7 * 4 + 2 + (sizeof(INFO) - 1) + 2];
     uint16_t idx = 0;
     AX25_EncodeAddress("APRS",  0, false, &frame[idx]); idx += 7;
-    AX25_EncodeAddress("TA1JS", 0, false, &frame[idx]); idx += 7;
+    AX25_EncodeAddress("N0CALL", 0, false, &frame[idx]); idx += 7;
     AX25_EncodeAddress("WIDE1", 1, false, &frame[idx]); idx += 7;
     AX25_EncodeAddress("WIDE2", 1, true,  &frame[idx]); idx += 7;
     frame[idx++] = 0x03;
@@ -285,7 +330,7 @@ int main(void)
     printf("info=\"%.*s\"\n", best_len - 2 - 30, &rxframe[30]);
 
     bool ok = (want == got) && rxframe[28] == 0x03 && rxframe[29] == 0xF0 &&
-              !memcmp(dst, "APRS  ", 6) && !memcmp(src, "TA1JS ", 6) &&
+              !memcmp(dst, "APRS  ", 6) && !memcmp(src, "N0CALL", 6) &&
               !memcmp(via, "WIDE1 ", 6) && !memcmp(via2, "WIDE2 ", 6) &&
               (rxframe[20] & 1) == 0 && (rxframe[27] & 1) == 1;
     printf(ok ? "ALL CHECKS PASSED\n" : "CHECKS FAILED\n");
@@ -361,8 +406,8 @@ int main(void)
     int32_t lat, lon;
 
     // uncompressed: our own beacon text
-    if (!APRS_ParseUncompressed((const uint8_t *)"4059.60N/02735.98E>", 19, &lat, &lon) ||
-        lat != 40993333 || lon != 27599666) {
+    if (!APRS_ParseUncompressed((const uint8_t *)"1000.00N/02000.00E>", 19, &lat, &lon) ||
+        lat != 10000000 || lon != 20000000) {
         printf("uncompressed FAIL: %d %d\n", lat, lon);
         pfail = 1;
     }
@@ -390,5 +435,56 @@ int main(void)
     }
 
     printf(pfail ? "POSITION PARSERS FAILED\n" : "POSITION PARSERS PASSED (uncompressed, Mic-E, base-91)\n");
-    return pfail;
+
+    // ---- phase 4: third-party (IS->RF gated) unwrap ----
+    int tpfail = 0;
+    {
+        const char *pl; int pll; char src[16];
+
+        // (A) gated message TO me (N0CALL, SSID 0) — the self-test round-trip
+        if (!TP_UnwrapAndMatch("}N0CALL>APRS,TCPIP,IGATE*::N0CALL   :Gate test via IGATE{2",
+                               "N0CALL", 0, &pl, &pll, src)
+            || strcmp(src, "N0CALL") != 0
+            || strcmp(pl, ":N0CALL   :Gate test via IGATE{2") != 0) {
+            printf("third-party msg (to me) FAIL: src=%s payload=%.*s\n", src, pll, pl);
+            tpfail = 1;
+        }
+
+        // (B) gated message addressed to bare N0CALL must NOT match when I am N0CALL-7
+        if (TP_UnwrapAndMatch("}FOO>APRS,TCPIP,IGATE*::N0CALL   :x{4",
+                              "N0CALL", 7, &pl, &pll, src)) {
+            printf("third-party msg (SSID mismatch) FAIL: matched wrongly\n");
+            tpfail = 1;
+        }
+
+        // (C) gated message to N0CALL-5, I am N0CALL-5 — matches, originator kept
+        if (!TP_UnwrapAndMatch("}FOO-1>APRS,TCPIP,IGATE*::N0CALL-5 :hey{5",
+                               "N0CALL", 5, &pl, &pll, src)
+            || strcmp(src, "FOO-1") != 0) {
+            printf("third-party msg (SSID match) FAIL: src=%s\n", src);
+            tpfail = 1;
+        }
+
+        // (D) gated uncompressed position unwraps and parses
+        if (TP_UnwrapAndMatch("}N0CALL>APRS,TCPIP,IGATE*:!1000.00N/02000.00E>UV-K5 APRS",
+                              "N0CALL", 0, &pl, &pll, src)  // not a message -> 0
+            || strcmp(src, "N0CALL") != 0 || pl[0] != '!') {
+            printf("third-party posn (unwrap) FAIL: src=%s payload=%.*s\n", src, pll, pl);
+            tpfail = 1;
+        } else if (!APRS_ParseUncompressed((const uint8_t *)pl + 1, (uint16_t)(pll - 1), &lat, &lon)
+                   || lat != 10000000 || lon != 20000000) {
+            printf("third-party posn (parse) FAIL: %d %d\n", lat, lon);
+            tpfail = 1;
+        }
+
+        // (E) regression: a normal (non-gated) direct message still matches
+        if (!TP_UnwrapAndMatch(":N0CALL   :direct{6", "N0CALL", 0, &pl, &pll, src)
+            || src[0] != 0 || strcmp(pl, ":N0CALL   :direct{6") != 0) {
+            printf("non-gated direct msg FAIL: src=%s payload=%.*s\n", src, pll, pl);
+            tpfail = 1;
+        }
+    }
+    printf(tpfail ? "THIRD-PARTY UNWRAP FAILED\n" : "THIRD-PARTY UNWRAP PASSED (msg to me, SSID match/mismatch, gated posn, direct regression)\n");
+
+    return pfail || tpfail;
 }
