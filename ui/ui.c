@@ -76,29 +76,37 @@ static_assert(ARRAY_SIZE(UI_DisplayFunctions) == DISPLAY_N_ELEM);
 #ifdef ENABLE_APRS
 static void UI_DrawAPRSMessageBox(void)
 {
-    // clear the interior and frame it
-    for (unsigned int r = 1; r <= 5; r++) {
-        memset(&gFrameBuffer[r][2], 0, 124);
-        gFrameBuffer[r][2]   = 0xFF;
+    // Overlay box across the bottom half of the screen (frame rows 3..6),
+    // completely covering the B-VFO/MR column (rows 4..6). Wipe the full
+    // width first so nothing of VFO B shows through; VFO B is redrawn by
+    // UI_DisplayMain once the message clears (sticky flag drops / times out).
+    for (unsigned int r = 3; r <= 6; r++) {
+        memset(gFrameBuffer[r], 0, LCD_WIDTH);
+        gFrameBuffer[r][2]   = 0xFF;   // left frame
         gFrameBuffer[r][3]   = 0xFF;
-        gFrameBuffer[r][124] = 0xFF;
+        gFrameBuffer[r][124] = 0xFF;   // right frame
         gFrameBuffer[r][125] = 0xFF;
     }
     for (unsigned int x = 2; x < 126; x++) {
-        gFrameBuffer[1][x] |= 0x03;   // top edge
-        gFrameBuffer[5][x] |= 0xC0;   // bottom edge
+        gFrameBuffer[3][x] |= 0x01;   // top edge    (y = 32)
+        gFrameBuffer[6][x] |= 0x80;   // bottom edge (y = 63; bit7 unused by font)
     }
 
-    // up to 3 lines of 16 chars
-    char line[17];
+    // up to 3 lines of 16 chars, vertically centred within text rows 4..6
     const unsigned int len = strlen(gAPRS_RxDisplay);
-    for (unsigned int r = 0; r < 3 && r * 16 < len; r++) {
+    unsigned int nlines = (len + 15) / 16;
+    if (nlines < 1) nlines = 1;
+    if (nlines > 3) nlines = 3;
+    const unsigned int start = 4 + (3 - nlines) / 2;
+
+    char line[17];
+    for (unsigned int r = 0; r < nlines; r++) {
         unsigned int n = len - r * 16;
         if (n > 16)
             n = 16;
         memcpy(line, &gAPRS_RxDisplay[r * 16], n);
         line[n] = 0;
-        UI_PrintStringSmallNormal(line, 8, 0, 2 + r);
+        UI_PrintStringSmallNormal(line, 8, 0, start + r);
     }
 }
 #endif
@@ -110,7 +118,10 @@ void GUI_DisplayScreen(void)
     }
 
 #ifdef ENABLE_APRS
-    if (gAPRS_RxSticky) {
+    // Draw any APRS RX text (a message to me, or a decoded position/telemetry
+    // packet) inside the cleared, framed box — never printed raw over the main
+    // screen, so a long packet can't garble the VFO-B column or status line.
+    if (gAPRS_RxDisplay[0]) {
         UI_DrawAPRSMessageBox();
         ST7565_BlitFullScreen();
     }

@@ -1396,9 +1396,10 @@ void UI_DisplayMain(void)
 
 #ifdef ENABLE_APRS
         if (gAPRS_RxDisplay[0] != 0 && !gAPRS_RxSticky)
-        {   // last decoded APRS packet (messages get the overlay box instead)
+        {   // decoded APRS packet — drawn in the cleared overlay box by
+            // GUI_DisplayScreen, not printed raw here (long packets used to
+            // wrap over the VFO-B column and garble the screen).
             center_line = CENTER_LINE_DTMF_DEC;
-            UI_PrintStringSmallNormal(gAPRS_RxDisplay, 2, 0, 3);
         }
         else
 #endif
