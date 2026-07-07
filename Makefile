@@ -258,7 +258,11 @@ ifeq ($(ENABLE_FEAT_F4HWN),1)
 
 	EDITION_STRING ?= Custom
 
-	AUTHOR_STRING ?= $(AUTHOR_STRING_1)+$(AUTHOR_STRING_2)
+	# Edition branding = the edition maintainer only. The full lineage
+	# (Dual Tachyon → OneOfEleven/fagci → egzumer → F4HWN) is credited where
+	# it legally must be: the Apache-2.0 LICENSE, per-file copyright headers,
+	# and README. Do not fold intermediate-fork handles back into this string.
+	AUTHOR_STRING ?= $(AUTHOR_STRING_2)
 	VERSION_STRING ?= $(VERSION_STRING_2)
 
 	SQL_TONE ?= 550 # For SA818, use 600 and python3 sa818.py --port /dev/ttyS2 radio --frequency 434.975 --ctcss 71.9 --tail Open
