@@ -658,12 +658,14 @@ void SETTINGS_LoadAPRS(void)
         if ((uint8_t)gAPRS_MsgTo[0] == 0xFF)
             gAPRS_MsgTo[0] = 0;
     } else {
+        // Neutral defaults for a fresh/wiped radio: the operator MUST set their
+        // own callsign before the firmware will transmit (see APRS_Configured).
         gEeprom.APRS_ON        = false;
         gEeprom.APRS_INTERVAL  = 10;
-        strcpy(gEeprom.APRS_CALLSIGN, "TA1JS");
+        strcpy(gEeprom.APRS_CALLSIGN, "N0CALL");
         gEeprom.APRS_SSID      = 0;
-        gEeprom.APRS_LATITUDE  = 40993293;   // 40.993293 N
-        gEeprom.APRS_LONGITUDE = 27599608;   // 27.599608 E
+        gEeprom.APRS_LATITUDE  = 0;
+        gEeprom.APRS_LONGITUDE = 0;
         gAPRS_MsgTo[0]         = 0;
         SETTINGS_SaveAPRS();
     }

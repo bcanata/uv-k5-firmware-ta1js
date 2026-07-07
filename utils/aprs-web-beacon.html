@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UV-K5 APRS Web Beacon</title>
+<style>
+  :root {
+    --bg: #edf0ef; --ink: #182024; --muted: #5a6a70; --line: #ccd4d2;
+    --accent: #c97a0a; --accent-ink: #fff; --ok: #2f7d4f; --warn: #a33f12;
+    --lcd-bg: #201d12; --lcd-frame: #35301e; --lcd-digit: #ffb020; --lcd-dim: #8a7a45;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#131719; --ink:#e8ecec; --muted:#93a1a6; --line:#2c3438;
+            --accent:#f0a020; --accent-ink:#131719; --ok:#5fd08a; --warn:#ff8a50; }
+  }
+  :root[data-theme="light"] { --bg:#edf0ef; --ink:#182024; --muted:#5a6a70; --line:#ccd4d2; --accent:#c97a0a; --accent-ink:#fff; --ok:#2f7d4f; --warn:#a33f12; }
+  :root[data-theme="dark"]  { --bg:#131719; --ink:#e8ecec; --muted:#93a1a6; --line:#2c3438; --accent:#f0a020; --accent-ink:#131719; --ok:#5fd08a; --warn:#ff8a50; }
+  * { box-sizing: border-box; }
+  body { background:var(--bg); color:var(--ink); margin:0; padding:2rem 1.25rem 3rem;
+         font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .wrap { max-width:26rem; margin:0 auto; display:flex; flex-direction:column; gap:1.3rem; }
+  .eyebrow { font:600 .72rem/1 ui-monospace,Menlo,monospace; letter-spacing:.14em;
+             text-transform:uppercase; color:var(--muted); }
+  h1 { font:700 1.55rem/1.2 ui-monospace,Menlo,monospace; letter-spacing:-.01em; margin:.35rem 0 0; }
+  .lede { color:var(--muted); margin:.5rem 0 0; }
+  button.big { display:block; width:100%; padding:.95rem 1rem; border:0; border-radius:6px;
+        font:700 .95rem/1 ui-monospace,Menlo,monospace; letter-spacing:.08em;
+        text-transform:uppercase; cursor:pointer; }
+  #connect { background:var(--ink); color:var(--bg); }
+  #connect.connected { background:var(--ok); color:#04120a; }
+  #beacon { background:var(--accent); color:var(--accent-ink); }
+  button.big:disabled { opacity:.45; cursor:not-allowed; }
+  button.big:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  .lcd { background:var(--lcd-bg); border:1px solid var(--lcd-frame); border-radius:8px;
+         padding:1rem; display:none; flex-direction:column; gap:.5rem; }
+  .lcd.on { display:flex; }
+  .lcd .label { font:600 .66rem/1 ui-monospace,Menlo,monospace; letter-spacing:.16em;
+                text-transform:uppercase; color:var(--lcd-dim); }
+  .lcd .big { font:700 clamp(1.4rem,7vw,1.9rem)/1.3 ui-monospace,Menlo,monospace;
+              color:var(--lcd-digit); font-variant-numeric:tabular-nums; }
+  .lcd .meta { font:400 .8rem/1.5 ui-monospace,Menlo,monospace; color:var(--lcd-dim); }
+  .status { min-height:1.4em; margin:0; font-size:.9rem; color:var(--muted); }
+  .status.err { color:var(--warn); } .status.ok { color:var(--ok); }
+  .fine { color:var(--muted); font-size:.78rem; border-top:1px solid var(--line); padding-top:1rem; margin:0; }
+  code { font-family:ui-monospace,Menlo,monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">UV-K5 &middot; APRS WEB BEACON</div>
+  <h1>Web Beacon</h1>
+  <p class="lede">Reads your GPS position and beacons it through a UV-K5 connected over USB (Web Serial on desktop, WebUSB/OTG on Android).</p>
+
+  <button id="connect" class="big" type="button">Connect Radio</button>
+  <p class="status" id="connStatus"></p>
+  <textarea id="rawerr" readonly style="display:none;width:100%;min-height:4.5em;font:400 .78rem/1.4 ui-monospace,Menlo,monospace;color:var(--warn);background:transparent;border:1px solid var(--line);border-radius:6px;padding:.5rem"></textarea>
+  <a href="#" id="showall" style="display:none;font-size:.82rem;color:var(--accent)">Show all USB devices</a>
+
+  <button id="beacon" class="big" type="button" disabled>Beacon My Location</button>
+  <p class="status" id="txStatus" role="status"></p>
+
+  <section class="lcd" id="fix">
+    <div class="label">Last fix sent</div>
+    <div class="big" id="coords"></div>
+    <div class="meta" id="meta"></div>
+  </section>
+
+  <div style="display:flex;flex-direction:column;gap:.7rem;border-top:1px solid var(--line);padding-top:1.1rem">
+    <label style="font:600 .72rem/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)"><span id="ivlLabel">Every</span>
+      <input id="ivl" type="number" min="30" max="1800" value="60" style="width:4.5rem;margin:0 .4rem;font:500 1rem ui-monospace,Menlo,monospace;color:var(--ink);background:var(--field-bg);border:1px solid var(--line);border-radius:6px;padding:.4rem .5rem"><span id="ivlUnit">s</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:.5rem;font:600 .72rem/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">
+      <input id="smart" type="checkbox" checked style="width:1.1rem;height:1.1rem"> Smart beaconing (speed &amp; turns)
+    </label>
+  </div>
+  <button id="track" class="big" type="button" disabled style="background:var(--ok);color:#04120a">Start Live Tracking</button>
+  <p class="status" id="trackStatus" role="status"></p>
+
+  <p class="fine">Set the radio to <b>144.800 MHz</b>, APRS <b>ON</b>, and configure your callsign first. iOS is not supported (its browsers lack Web Serial/WebUSB). On Android use Chrome + a USB-OTG cable. The radio must be in <b>normal mode</b> (not flash mode). Note: with a plain 3-wire programming cable, TX may be blocked unless the firmware's cable-voltage exception is present.</p>
+</div>
+
+<script>
+"use strict";
+
+// ---- K5 UART framing (matches utils/aprs_pc.py) ----
+var XOR = [0x16,0x6C,0x14,0xE6,0x2E,0x91,0x0D,0x40,0x21,0x35,0xD5,0x40,0x13,0x03,0xE9,0x80];
+
+function crc16(bytes) {
+  var crc = 0;
+  for (var i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i] << 8;
+    for (var b = 0; b < 8; b++)
+      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+  }
+  return crc;
+}
+function xorApply(bytes) {
+  var out = new Uint8Array(bytes.length);
+  for (var i = 0; i < bytes.length; i++) out[i] = bytes[i] ^ XOR[i % 16];
+  return out;
+}
+// build a full framed command: AB CD | len | XOR(payload+crc) | DC BA
+function frameCommand(id, data) {
+  data = data || new Uint8Array(0);
+  var payload = new Uint8Array(4 + data.length);
+  payload[0] = id & 0xFF; payload[1] = (id >> 8) & 0xFF;
+  payload[2] = data.length & 0xFF; payload[3] = (data.length >> 8) & 0xFF;
+  payload.set(data, 4);
+  var crc = crc16(payload);
+  var body = new Uint8Array(payload.length + 2);
+  body.set(payload, 0);
+  body[payload.length] = crc & 0xFF; body[payload.length + 1] = (crc >> 8) & 0xFF;
+  var enc = xorApply(body);
+  var out = new Uint8Array(4 + enc.length + 2);
+  out[0] = 0xAB; out[1] = 0xCD; out[2] = payload.length & 0xFF; out[3] = (payload.length >> 8) & 0xFF;
+  out.set(enc, 4);
+  out[out.length - 2] = 0xDC; out[out.length - 1] = 0xBA;
+  return out;
+}
+// 0x0704: beacon at lat/lon (micro-degrees, signed int32 LE)
+function cmdBeaconAt(latUdeg, lonUdeg) {
+  var d = new Uint8Array(8), dv = new DataView(d.buffer);
+  dv.setInt32(0, latUdeg, true);
+  dv.setInt32(4, lonUdeg, true);
+  return frameCommand(0x0704, d);
+}
+
+// ---- transport: Web Serial (desktop) or WebUSB+CH340 (Android) ----
+var transport = null;
+
+function makeWebSerial() {
+  var port = null, writer = null;
+  return {
+    name: "Web Serial",
+    connect: async function () {
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 38400 });
+      writer = port.writable.getWriter();
+    },
+    send: async function (bytes) { await writer.write(bytes); }
+  };
+}
+
+// minimal CH340 driver over WebUSB (baud 38400, 8N1)
+function makeWebUsb(showAll) {
+  var dev = null, epOut = 0, step = "";
+  async function ctrl(tag, req, val, idx) {
+    step = tag;
+    var r = await dev.controlTransferOut(
+      { requestType: "vendor", recipient: "device", request: req, value: val, index: idx });
+    if (r && r.status && r.status !== "ok")
+      throw new Error("ctrl " + tag + " returned " + r.status);
+  }
+  function ch341Divisor(baud) {
+    // modern ch341 divisor (matches the current Linux/Android kernel driver)
+    var CLK = 48000000, fact = 1, ps, clkDiv, div;
+    var minRate = [CLK / (4096 * 512), CLK / (512 * 512), CLK / (64 * 512), CLK / (8 * 512)];
+    for (ps = 3; ps >= 0; ps--) if (baud > minRate[ps]) break;
+    if (ps < 0) ps = 0;
+    clkDiv = 1 << (12 - 3 * ps - fact);
+    div = Math.floor(CLK / (clkDiv * baud));
+    if (div < 9 || div > 255) { fact = 0; clkDiv = 1 << (12 - 3 * ps); div = Math.floor(CLK / (clkDiv * baud)); }
+    return ((((0x100 - div) & 0xff) << 8) | (fact << 2) | ps) & 0xffff;  // 38400 -> 0x6403
+  }
+  async function ch340Init() {
+    try {
+      await ctrl("init", 0xA1, 0x0000, 0x0000);              // serial init
+      await ctrl("baud", 0x9A, 0x1312, ch341Divisor(38400)); // baud 38400 (0x6403)
+      await ctrl("lcr",  0x9A, 0x2518, 0x00C3);              // 8N1 + enable RX + enable TX
+    } catch (e) {
+      throw new Error("CH340 setup failed at step '" + step + "': " +
+                      (e && e.message ? e.message : e));
+    }
+  }
+  // common USB-serial adapters (CH340/CH910x, CP210x, FTDI, PL2303)
+  var filters = showAll ? [] : [
+    { vendorId: 0x1A86 }, { vendorId: 0x10C4 },
+    { vendorId: 0x0403 }, { vendorId: 0x067B }
+  ];
+  return {
+    name: "WebUSB",
+    connect: async function (preDevice) {
+      // requestDevice() MUST be the first await inside the click handler, or
+      // Android Chrome drops the user activation and rejects with NotFoundError
+      // ("No device selected"). preDevice is only passed by the page-load
+      // auto-reconnect, which runs outside a gesture and needs no prompt.
+      dev = preDevice || await navigator.usb.requestDevice({ filters: filters });
+      await dev.open();
+      if (dev.configuration === null) await dev.selectConfiguration(1);
+      var iface = dev.configuration.interfaces[0];
+      try {
+        await dev.claimInterface(iface.interfaceNumber);
+      } catch (e) {
+        throw new Error("adapter busy — Android's built-in serial driver likely claimed it; this phone/Android version may not allow WebUSB serial");
+      }
+      iface.alternates[0].endpoints.forEach(function (e) {
+        if (e.direction === "out") epOut = e.endpointNumber;
+      });
+      if (!epOut) throw new Error("no OUT endpoint found on the adapter");
+      await ch340Init();
+    },
+    send: async function (bytes) { await dev.transferOut(epOut, bytes); }
+  };
+}
+
+// ---- UI ----
+var connectBtn = document.getElementById("connect");
+var beaconBtn  = document.getElementById("beacon");
+var connStatus = document.getElementById("connStatus");
+var txStatus   = document.getElementById("txStatus");
+var fix        = document.getElementById("fix");
+var coordsEl   = document.getElementById("coords");
+var metaEl     = document.getElementById("meta");
+
+function setConn(msg, cls) { connStatus.textContent = msg; connStatus.className = "status " + (cls || ""); }
+function setTx(msg, cls)   { txStatus.textContent = msg;   txStatus.className   = "status " + (cls || ""); }
+
+var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+async function tryConnect(makeTransport, preDevice) {
+  transport = makeTransport();
+  if (!preDevice) setConn("Choose the radio's USB adapter in the dialog…");
+  await transport.connect(preDevice);
+  setConn("Connected via " + transport.name + ".", "ok");
+  connectBtn.classList.add("connected");
+  connectBtn.textContent = "Radio Connected";
+  beaconBtn.disabled = false;
+  document.getElementById("track").disabled = false;
+}
+
+connectBtn.addEventListener("click", async function () {
+  try {
+    // Web Serial is desktop-only; on mobile always use WebUSB.
+    if (!isMobile && ("serial" in navigator)) await tryConnect(makeWebSerial);
+    else if ("usb" in navigator)              await tryConnect(function () { return makeWebUsb(false); });
+    else if ("serial" in navigator)           await tryConnect(makeWebSerial);
+    else { setConn("This browser supports neither WebUSB nor Web Serial. iOS cannot do this; on Android use Chrome.", "err"); }
+  } catch (e) {
+    var msg = (e && e.message) ? e.message : String(e);
+    if (/No device selected|cancell/i.test(msg))
+      setConn("No adapter picked. If the list was empty, tap “Show all USB devices” below.", "err");
+    else
+      setConn("Connection failed (full detail below).", "err");
+    var box = document.getElementById("rawerr");
+    box.value = (e && e.name ? e.name + "\n" : "") + msg;
+    box.style.display = "block";
+    transport = null;
+    showAllLink.style.display = ("usb" in navigator) ? "inline" : "none";
+  }
+});
+
+// fallback: show every USB device (in case the adapter's VID isn't in the filter)
+var showAllLink = document.getElementById("showall");
+showAllLink.addEventListener("click", async function (ev) {
+  ev.preventDefault();
+  try { await tryConnect(function () { return makeWebUsb(true); }); showAllLink.style.display = "none"; }
+  catch (e) { setConn("Still failed: " + ((e && e.message) ? e.message : e), "err"); }
+});
+
+// send one beacon at a fix; updates the LCD. Returns a promise.
+async function sendFix(pos) {
+  var lat = pos.coords.latitude, lon = pos.coords.longitude;
+  var acc = Math.round(pos.coords.accuracy);
+  await transport.send(cmdBeaconAt(Math.round(lat * 1e6), Math.round(lon * 1e6)));
+  coordsEl.textContent = Math.abs(lat).toFixed(4) + (lat < 0 ? "S" : "N") + "  " +
+                         Math.abs(lon).toFixed(4) + (lon < 0 ? "W" : "E");
+  metaEl.textContent = "±" + acc + " m  ·  sent " + new Date().toLocaleTimeString();
+  fix.classList.add("on");
+}
+
+var geoErr = function (setter) {
+  return function (err) {
+    if (err && err.code === 1) setter("Location permission denied.", "err");
+    else if (err && err.code === 3) setter("GPS timed out. Try again outdoors.", "err");
+    else setter("Could not get location. Is GPS on?", "err");
+  };
+};
+
+beaconBtn.addEventListener("click", function () {
+  if (!transport) { setTx("Connect the radio first.", "err"); return; }
+  if (!navigator.geolocation) { setTx("This browser has no geolocation.", "err"); return; }
+  setTx("Waiting for GPS…");
+  beaconBtn.disabled = true;
+  navigator.geolocation.getCurrentPosition(async function (pos) {
+    try { await sendFix(pos); setTx("Beacon sent to radio.", "ok"); }
+    catch (e) { setTx("Send failed: " + (e && e.message ? e.message : e) + " (still connected?)", "err"); }
+    beaconBtn.disabled = false;
+  }, function (e) { beaconBtn.disabled = false; geoErr(setTx)(e); },
+     { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+});
+
+// ---- Live tracking: watch GPS, beacon on an interval, keep screen awake ----
+var trackBtn    = document.getElementById("track");
+var trackStatus = document.getElementById("trackStatus");
+var ivlInput    = document.getElementById("ivl");
+function setTrack(msg, cls) { trackStatus.textContent = msg; trackStatus.className = "status " + (cls || ""); }
+
+var smartBox = document.getElementById("smart");
+var ivlLabel = document.getElementById("ivlLabel");
+var ivlUnit  = document.getElementById("ivlUnit");
+
+var tracking = false, watchId = null, timerId = null, wakeLock = null;
+var lastPos = null, sentCount = 0, sending = false;
+var lastBeaconMs = 0, lastHeading = null;
+
+// SmartBeaconing (KA9MVA/KD7TA) defaults; "fast rate" = the interval field.
+var SB = { slowSpeed: 5, fastSpeed: 90, turnMin: 27, turnSlope: 255, turnTime: 15 };
+
+function relabel() {
+  if (smartBox.checked) { ivlLabel.textContent = "Fast rate"; ivlUnit.textContent = "s (@ speed)"; }
+  else                  { ivlLabel.textContent = "Every";     ivlUnit.textContent = "s"; }
+}
+smartBox.addEventListener("change", relabel);
+relabel();
+
+async function acquireWakeLock() {
+  try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+}
+function releaseWakeLock() { try { if (wakeLock) wakeLock.release(); } catch (e) {} wakeLock = null; }
+document.addEventListener("visibilitychange", function () {
+  if (tracking && document.visibilityState === "visible" && !wakeLock) acquireWakeLock();
+});
+
+// decide whether to beacon now, per fixed-interval or SmartBeaconing
+function maybeBeacon() {
+  if (!tracking || !lastPos || sending) return;
+  var now = Date.now();
+  var elapsed = (now - lastBeaconMs) / 1000;
+  var fast = Math.max(30, Math.min(1800, parseInt(ivlInput.value, 10) || 60));
+  var reason = null;
+
+  if (!smartBox.checked) {
+    if (elapsed >= fast) reason = "fixed";
+  } else {
+    var spd = (lastPos.coords.speed != null && lastPos.coords.speed >= 0) ? lastPos.coords.speed * 3.6 : 0; // km/h
+    var slow = Math.min(1800, fast * 10);
+    var rate;
+    if (spd < SB.slowSpeed) rate = slow;
+    else if (spd > SB.fastSpeed) rate = fast;
+    else rate = Math.max(fast, Math.min(slow, fast * SB.fastSpeed / spd));
+    // corner pegging: beacon on a significant heading change
+    var hd = lastPos.coords.heading;
+    if (hd != null && lastHeading != null && elapsed > SB.turnTime && spd >= SB.slowSpeed) {
+      var dh = Math.abs(hd - lastHeading); if (dh > 180) dh = 360 - dh;
+      var thresh = SB.turnMin + SB.turnSlope / Math.max(spd, 1);
+      if (dh > thresh) reason = "turn";
+    }
+    if (elapsed >= rate) reason = "time";
+    window._sbInfo = Math.round(spd) + " km/h, next ~" + Math.round(rate) + "s";
+  }
+  if (reason) doBeacon(reason);
+}
+
+async function doBeacon(reason) {
+  sending = true;
+  try {
+    await sendFix(lastPos);
+    lastBeaconMs = Date.now();
+    lastHeading = (lastPos.coords.heading != null) ? lastPos.coords.heading : lastHeading;
+    sentCount++;
+    setTrack("Tracking — " + sentCount + " sent (" + reason + ")" +
+             (smartBox.checked && window._sbInfo ? ", " + window._sbInfo : "") +
+             ". Keep screen on.", "ok");
+  } catch (e) {
+    setTrack("Send failed (" + (e && e.message ? e.message : e) + "). Tracking stopped.", "err");
+    stopTracking();
+  }
+  sending = false;
+}
+
+function startTracking() {
+  if (!transport) { setTrack("Connect the radio first.", "err"); return; }
+  if (!navigator.geolocation) { setTrack("This browser has no geolocation.", "err"); return; }
+  tracking = true; sentCount = 0; lastPos = null; lastBeaconMs = 0; lastHeading = null;
+  trackBtn.textContent = "Stop Live Tracking";
+  trackBtn.style.background = "var(--warn)"; trackBtn.style.color = "#fff";
+  beaconBtn.disabled = true; ivlInput.disabled = true; smartBox.disabled = true;
+  setTrack("Acquiring GPS…");
+  acquireWakeLock();
+  watchId = navigator.geolocation.watchPosition(
+    function (pos) { lastPos = pos; maybeBeacon(); },   // responsive to turns/first fix
+    geoErr(setTrack),
+    { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 });
+  timerId = setInterval(maybeBeacon, 3000);            // also fire when stationary
+}
+
+function stopTracking() {
+  tracking = false;
+  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if (timerId !== null) { clearInterval(timerId); timerId = null; }
+  releaseWakeLock();
+  trackBtn.textContent = "Start Live Tracking";
+  trackBtn.style.background = "var(--ok)"; trackBtn.style.color = "#04120a";
+  ivlInput.disabled = false; smartBox.disabled = false;
+  beaconBtn.disabled = !transport;
+}
+
+trackBtn.addEventListener("click", function () { tracking ? stopTracking() : startTracking(); });
+
+// auto-reconnect on load to an already-permitted adapter (no gesture needed,
+// so getDevices() here does NOT harm the requestDevice activation later)
+if (isMobile && ("usb" in navigator)) {
+  navigator.usb.getDevices().then(function (list) {
+    for (var i = 0; i < list.length; i++) {
+      var v = list[i].vendorId;
+      if (v === 0x1A86 || v === 0x10C4 || v === 0x0403 || v === 0x067B) {
+        tryConnect(function () { return makeWebUsb(false); }, list[i]).catch(function () {});
+        return;
+      }
+    }
+  }).catch(function () {});
+}
+
+// hint about support up front
+if (!("serial" in navigator) && !("usb" in navigator)) {
+  if (/iPhone|iPad|iPod/i.test(navigator.userAgent))
+    setConn("iOS browsers cannot access USB serial. Use a desktop, or an Android phone with Chrome + OTG.", "err");
+  else
+    setConn("This browser has no WebUSB/Web Serial. Use Chrome (desktop or Android).", "err");
+} else if (isMobile && !("usb" in navigator)) {
+  setConn("This mobile browser lacks WebUSB. Use Chrome for Android.", "err");
+}
+</script>
+</body>
+</html>

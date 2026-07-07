@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UV-K5 APRS Kod Aracı</title>
+<title>UV-K5 APRS Code Tool</title>
 <style>
   :root {
     --bg: #edf0ef;
@@ -47,12 +47,32 @@
     padding: 2rem 1.25rem 3rem;
   }
   .wrap { max-width: 26rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1.4rem; }
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
   .eyebrow {
     font: 600 0.72rem/1 ui-monospace, "SF Mono", Menlo, monospace;
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--muted);
   }
+  .langtoggle {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    flex: none;
+  }
+  .langtoggle button {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: 700 0.72rem/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.08em;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+  }
+  .langtoggle button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .langtoggle button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
   h1 {
     font: 700 1.6rem/1.2 ui-monospace, "SF Mono", Menlo, monospace;
     letter-spacing: -0.01em;
@@ -173,52 +193,165 @@
 <body>
 
 <div class="wrap">
+  <div class="topbar">
+    <div class="eyebrow" id="t-eyebrow">UV-K5 &middot; APRS FIELD TOOL</div>
+    <div class="langtoggle" role="group" aria-label="Language">
+      <button type="button" data-lang="tr" aria-pressed="false">TR</button>
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+    </div>
+  </div>
+
   <header>
-    <div class="eyebrow">UV-K5 &middot; APRS SAHA ARACI</div>
-    <h1>Kod Aracı</h1>
-    <p class="lede">Konum, çağrı işareti ve mesajı telsizin tuş takımıyla girilecek rakam kodlarına çevirir.</p>
+    <h1 id="t-title">Code Tool</h1>
+    <p class="lede" id="t-lede">Turns your location, callsign and message into number codes you enter on the radio keypad.</p>
   </header>
 
-  <h2>Konum &rarr; 73 Loc</h2>
-  <button id="git" type="button">Konumu Al</button>
+  <h2 id="t-h2loc">Location &rarr; 73 Loc</h2>
+  <button id="git" type="button">Get Location</button>
   <p class="status" id="durum" role="status"></p>
   <section class="lcd" id="panel" aria-live="polite">
-    <div class="label">15 hane &middot; Menü 73 Loc</div>
+    <div class="label" id="t-loclabel">15 digits &middot; Menu 73 Loc</div>
     <div class="code" id="kod"></div>
     <div class="meta" id="meta"></div>
   </section>
 
-  <h2>Metin &rarr; Call / MsgTo / Msg</h2>
-  <label class="f">Çağrı işareti (Call / MsgTo)
+  <h2 id="t-h2text">Text &rarr; Call / MsgTo / Msg</h2>
+  <label class="f" id="t-calllabel">Callsign (Call / MsgTo)
     <input id="cagri" maxlength="9" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="TB1AAW">
   </label>
   <section class="lcd" id="cagriPanel">
-    <div class="label">Her karakter = 2 hane</div>
+    <div class="label t-pair">Each character = 2 digits</div>
     <div class="code" id="cagriKod"></div>
     <div class="meta" id="cagriMeta"></div>
   </section>
 
-  <label class="f">Mesaj (Msg / Cmnt) &mdash; en çok 30 karakter
+  <label class="f" id="t-msglabel">Message (Msg / Cmnt) &mdash; up to 30 characters
     <textarea id="mesaj" maxlength="30" rows="2" autocomplete="off" spellcheck="false" placeholder="QSL 73"></textarea>
   </label>
   <section class="lcd" id="mesajPanel">
-    <div class="label">Her karakter = 2 hane</div>
+    <div class="label t-pair">Each character = 2 digits</div>
     <div class="code" id="mesajKod"></div>
     <div class="meta" id="mesajMeta"></div>
   </section>
 
-  <ol class="steps">
-    <li>Kodu bu sayfadan üretin.</li>
-    <li>Telsizde ilgili menü alanına MENU ile girin.</li>
-    <li>Rakamları soldan sağa girin &mdash; metin alanlarında her <b>2 rakam</b> bir karaktere dönüşür, ekranda anında görürsünüz.</li>
-    <li><b>EXIT</b> = geri sil &middot; son karakterde <b>MENU</b> = kaydet.</li>
-  </ol>
+  <ol class="steps" id="t-steps"></ol>
 
-  <p class="fine">Karakter tablosu: 00&ndash;09 rakamlar, 10&ndash;35 A&ndash;Z, 36 boşluk, 37&ndash;45 noktalama (-./?!@:,'). Konum kodunun son hanesi kontrol hanesidir; hatalı kod telsizce reddedilir. Konum çözünürlüğü ~11&nbsp;m.</p>
+  <p class="fine" id="t-fine"></p>
 </div>
 
 <script>
   var CS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ -./?!@:,'";
+
+  // ---- bilingual strings ----
+  var T = {
+    tr: {
+      html: "tr",
+      eyebrow: "UV-K5 &middot; APRS SAHA ARACI",
+      title: "Kod Aracı",
+      lede: "Konum, çağrı işareti ve mesajı telsizin tuş takımıyla girilecek rakam kodlarına çevirir.",
+      h2loc: "Konum &rarr; 73 Loc",
+      getBtn: "Konumu Al",
+      refreshBtn: "Konumu Yenile",
+      retryBtn: "Tekrar Dene",
+      searchingBtn: "Aranıyor…",
+      loclabel: "15 hane &middot; Menü 73 Loc",
+      h2text: "Metin &rarr; Call / MsgTo / Msg",
+      calllabel: "Çağrı işareti (Call / MsgTo)",
+      msglabel: "Mesaj (Msg / Cmnt) &mdash; en çok 30 karakter",
+      pair: "Her karakter = 2 hane",
+      steps: [
+        "Kodu bu sayfadan üretin.",
+        "Telsizde ilgili menü alanına MENU ile girin.",
+        "Rakamları soldan sağa girin &mdash; metin alanlarında her <b>2 rakam</b> bir karaktere dönüşür, ekranda anında görürsünüz.",
+        "<b>EXIT</b> = geri sil &middot; son karakterde <b>MENU</b> = kaydet."
+      ],
+      fine: "Karakter tablosu: 00&ndash;09 rakamlar, 10&ndash;35 A&ndash;Z, 36 boşluk, 37&ndash;45 noktalama (-./?!@:,'). Konum kodunun son hanesi kontrol hanesidir; hatalı kod telsizce reddedilir. Konum çözünürlüğü ~11&nbsp;m.",
+      waiting: "GPS bekleniyor…",
+      outOfRange: "Konum aralık dışında görünüyor, tekrar deneyin.",
+      lowAcc: function (a) { return "GPS hassasiyeti düşük (±" + a + " m). Açık alanda yenileyin."; },
+      denied: "Konum izni reddedildi. Tarayıcı ayarlarından bu sayfaya konum izni verin.",
+      timeout: "Konum alma zaman aşımına uğradı. Açık alanda tekrar deneyin.",
+      failed: "Konum alınamadı. GPS açık mı?",
+      noGeo: "Bu tarayıcı konum servisini desteklemiyor.",
+      skipped: "  (desteklenmeyen karakterler atlandı)"
+    },
+    en: {
+      html: "en",
+      eyebrow: "UV-K5 &middot; APRS FIELD TOOL",
+      title: "Code Tool",
+      lede: "Turns your location, callsign and message into number codes you enter on the radio keypad.",
+      h2loc: "Location &rarr; 73 Loc",
+      getBtn: "Get Location",
+      refreshBtn: "Refresh Location",
+      retryBtn: "Try Again",
+      searchingBtn: "Locating…",
+      loclabel: "15 digits &middot; Menu 73 Loc",
+      h2text: "Text &rarr; Call / MsgTo / Msg",
+      calllabel: "Callsign (Call / MsgTo)",
+      msglabel: "Message (Msg / Cmnt) &mdash; up to 30 characters",
+      pair: "Each character = 2 digits",
+      steps: [
+        "Generate the code on this page.",
+        "On the radio, open the matching menu field with MENU.",
+        "Enter the digits left to right &mdash; in text fields every <b>2 digits</b> become one character, shown instantly on screen.",
+        "<b>EXIT</b> = backspace &middot; on the last character <b>MENU</b> = save."
+      ],
+      fine: "Character table: 00&ndash;09 digits, 10&ndash;35 A&ndash;Z, 36 space, 37&ndash;45 punctuation (-./?!@:,'). The location code's last digit is a checksum; a wrong code is rejected by the radio. Location resolution ~11&nbsp;m.",
+      waiting: "Waiting for GPS…",
+      outOfRange: "Location seems out of range, try again.",
+      lowAcc: function (a) { return "Low GPS accuracy (±" + a + " m). Refresh outdoors."; },
+      denied: "Location permission denied. Allow location for this page in your browser settings.",
+      timeout: "Location request timed out. Try again outdoors.",
+      failed: "Could not get location. Is GPS on?",
+      noGeo: "This browser does not support geolocation.",
+      skipped: "  (unsupported characters skipped)"
+    }
+  };
+
+  var LANG = "en";
+  var lastState = null;  // remember button state so language switch keeps it
+
+  function applyLang() {
+    var d = T[LANG];
+    document.documentElement.lang = d.html;
+    document.getElementById("t-eyebrow").innerHTML = d.eyebrow;
+    document.getElementById("t-title").textContent = d.title;
+    document.getElementById("t-lede").textContent = d.lede;
+    document.getElementById("t-h2loc").innerHTML = d.h2loc;
+    document.getElementById("t-loclabel").innerHTML = d.loclabel;
+    document.getElementById("t-h2text").innerHTML = d.h2text;
+    // labels contain an input/textarea child; set only the leading text node
+    setLabelText("t-calllabel", d.calllabel);
+    setLabelText("t-msglabel", d.msglabel);
+    var pairs = document.querySelectorAll(".t-pair");
+    for (var i = 0; i < pairs.length; i++) pairs[i].textContent = d.pair;
+    var ol = document.getElementById("t-steps");
+    ol.innerHTML = "";
+    for (var j = 0; j < d.steps.length; j++) {
+      var li = document.createElement("li");
+      li.innerHTML = d.steps[j];
+      ol.appendChild(li);
+    }
+    document.getElementById("t-fine").innerHTML = d.fine;
+    // button label reflects current state
+    if (!btn.disabled)
+      btn.textContent = (lastState === "done") ? d.refreshBtn
+                      : (lastState === "err")  ? d.retryBtn
+                      : d.getBtn;
+    document.title = d.title + " – UV-K5 APRS";
+    var btns = document.querySelectorAll(".langtoggle button");
+    for (var k = 0; k < btns.length; k++)
+      btns[k].setAttribute("aria-pressed", btns[k].dataset.lang === LANG ? "true" : "false");
+  }
+
+  function setLabelText(id, text) {
+    var el = document.getElementById(id);
+    // first child is the text node before the input/textarea
+    if (el.firstChild && el.firstChild.nodeType === 3)
+      el.firstChild.textContent = text + " ";
+    else
+      el.insertBefore(document.createTextNode(text + " "), el.firstChild);
+  }
 
   var btn = document.getElementById('git');
   var durum = document.getElementById('durum');
@@ -237,15 +370,17 @@
   }
 
   function goster(pos) {
+    var d = T[LANG];
     var lat = pos.coords.latitude;
     var lon = pos.coords.longitude;
     var acc = Math.round(pos.coords.accuracy);
     var kod = kodYap(lat, lon);
     btn.disabled = false;
-    btn.textContent = 'Konumu Yenile';
+    lastState = "done";
+    btn.textContent = d.refreshBtn;
     if (!kod) {
       durum.className = 'status err';
-      durum.textContent = 'Konum aralık dışında görünüyor, tekrar deneyin.';
+      durum.textContent = d.outOfRange;
       return;
     }
     durum.className = 'status';
@@ -254,33 +389,36 @@
     metaEl.textContent = lat.toFixed(4) + '°  ' + lon.toFixed(4) + '°  (±' + acc + ' m)';
     if (acc > 100) {
       durum.className = 'status err';
-      durum.textContent = 'GPS hassasiyeti düşük (±' + acc + ' m). Açık alanda yenileyin.';
+      durum.textContent = d.lowAcc(acc);
     }
     panel.classList.add('on');
   }
 
   function hata(e) {
+    var d = T[LANG];
     btn.disabled = false;
-    btn.textContent = 'Tekrar Dene';
+    lastState = "err";
+    btn.textContent = d.retryBtn;
     durum.className = 'status err';
     if (e && e.code === 1)
-      durum.textContent = 'Konum izni reddedildi. Tarayıcı ayarlarından bu sayfaya konum izni verin.';
+      durum.textContent = d.denied;
     else if (e && e.code === 3)
-      durum.textContent = 'Konum alma zaman aşımına uğradı. Açık alanda tekrar deneyin.';
+      durum.textContent = d.timeout;
     else
-      durum.textContent = 'Konum alınamadı. GPS açık mı?';
+      durum.textContent = d.failed;
   }
 
   btn.addEventListener('click', function () {
+    var d = T[LANG];
     if (!navigator.geolocation) {
       durum.className = 'status err';
-      durum.textContent = 'Bu tarayıcı konum servisini desteklemiyor.';
+      durum.textContent = d.noGeo;
       return;
     }
     btn.disabled = true;
-    btn.textContent = 'Aranıyor…';
+    btn.textContent = d.searchingBtn;
     durum.className = 'status';
-    durum.textContent = 'GPS bekleniyor…';
+    durum.textContent = d.waiting;
     navigator.geolocation.getCurrentPosition(goster, hata, {
       enableHighAccuracy: true,
       timeout: 20000,
@@ -306,12 +444,25 @@
       }
       if (pairs.length === 0) { pan.classList.remove('on'); return; }
       kodOut.textContent = pairs.join(' ');
-      metaOut.textContent = temiz + (atlandi ? '  (desteklenmeyen karakterler atlandı)' : '');
+      metaOut.textContent = temiz + (atlandi ? T[LANG].skipped : '');
       pan.classList.add('on');
     });
   }
   metinKodla('cagri', 'cagriPanel', 'cagriKod', 'cagriMeta');
   metinKodla('mesaj', 'mesajPanel', 'mesajKod', 'mesajMeta');
+
+  // language toggle
+  var langBtns = document.querySelectorAll(".langtoggle button");
+  for (var i = 0; i < langBtns.length; i++) {
+    langBtns[i].addEventListener("click", function () {
+      LANG = this.dataset.lang;
+      applyLang();
+    });
+  }
+
+  // default to the browser language if it's Turkish, else English
+  if ((navigator.language || "").toLowerCase().indexOf("tr") === 0) LANG = "tr";
+  applyLang();
 </script>
 </body>
 </html>

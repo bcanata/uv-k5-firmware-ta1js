@@ -1207,7 +1207,10 @@ void UI_DisplayMenu(void)
                 sprintf(String, "%-10.10s", gAPRS_MsgText);
             break;
         case MENU_APRS_INTV:
-            sprintf(String, "%d min", gSubMenuSelection);
+            if (gSubMenuSelection == 0)
+                strcpy(String, "OFF");
+            else
+                sprintf(String, "%d min", gSubMenuSelection);
             break;
         case MENU_APRS_CALL:
             // Display callsign from edit array

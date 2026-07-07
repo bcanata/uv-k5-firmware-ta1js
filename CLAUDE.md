@@ -14,12 +14,17 @@ Custom firmware for the Quansheng UV-K5/K6/5R handheld radios — a fork of F4HW
 
 ## Build System
 
+This is the **public APRS edition**: `make` alone builds it (`ENABLE_APRS ?= 1`).
+
 ```bash
-make ENABLE_APRS=1            # local build (arm-none-eabi-gcc 10.3.1 required, brew works)
-make clean                    # note: clean misses APRS objects unless ENABLE_APRS=1 is passed
+make                          # APRS edition (arm-none-eabi-gcc 10.3.1 required, brew works)
+make ENABLE_APRS=0            # plain radio, no APRS
 ```
 
-- `ENABLE_APRS` defaults to **0** in the Makefile — a plain `make` produces a firmware without APRS.
+- `ENABLE_APRS` defaults to **1**. To fit flash the edition also defaults OFF: VOX, TX1750, mic audio bar, small-bold font, RX/TX timer, sleep, FM radio, spectrum.
+- `ENABLE_AMATEUR_BAND_ONLY` defaults to **1** (VFO/TX limited to Turkish amateur allocations; see below). Set `=0` to remove.
+- User-facing docs: `docs/APRS.md`. Companion web tools live in the separate repo published at `bcanata.github.io/uv-k5-aprs-beacon` (source also in `utils/`).
+- **Release safety:** a fresh/reset radio defaults to callsign `N0CALL`, location 0/0, and **refuses to transmit** until a real callsign is set (`APRS_Configured()` gates every TX path). Never re-introduce a personal callsign as the default.
 - Output: `f4hwn` (ELF), `f4hwn.bin` (raw, what the flasher needs), `f4hwn.packed.bin` (needs python `crcmod`; if pip is blocked by PEP 668, use a venv and run `python fw-pack.py f4hwn.bin F4HWN v4.3 f4hwn.packed.bin`).
 - Docker build also available: `./compile-with-docker.sh <edition>` → `compiled-firmware/`.
 - If make fails with "No rule to make target .../printf_config.h" after the repo was moved, delete stale `*.d` files (they hold absolute paths).
@@ -75,11 +80,17 @@ Key register recipe (all confirmed against the official docs in `docs/bk4819/`):
 
 TX FIFO is 128 words (256 bytes) — the whole packet fits in one fill. TX duration is timed with a fixed delay: `(10 + nbytes) × 6.67 ms + margin`.
 
-Beacon and message frames are built from the menu-configured callsign/SSID/location/comment (`APRS_BuildHeader` + `APRS_TransmitBeacon` / `APRS_SendMessage`). Nothing is hardcoded anymore.
+Beacon and message frames are built from the menu-configured callsign/SSID/location/comment (`APRS_BuildHeader` + `APRS_TransmitBeacon` / `APRS_SendMessage`). Nothing is hardcoded. `APRS_TransmitNow`/`APRS_SendMessage`/`APRS_BeaconAt` and the auto-beacon all bail out unless `APRS_Configured()` (callsign set and not `N0CALL`).
+
+**Auto-beacon:** `Intv` menu (0 = off, 1–60 min). `APRS_Task` counts down and beacons the stored position; first beacon ~15 s after enabling, then every interval. `APRS_ResetBeaconTimer()` is called when APRS/Intv change.
+
+**UART / PC & web control:** `app/uart.c` adds `0x0700` (send message), `0x0702` (beacon stored position), `0x0704` (beacon a lat/lon passed in the command — used by the web beacon for live GPS), and emits `APRS:<text>` on every decode for monitoring. `APRS_BeaconAt(lat,lon)` is the 0x0704 entry point.
+
+**Band restriction (`ENABLE_AMATEUR_BAND_ONLY`):** `frequencies.c` `RX_freq_check`/`TX_freq_check` reject anything outside `amateurBands[]`; keypad entry snaps to the nearest amateur edge (`FREQUENCY_SnapToAmateur`). Units are 10 Hz.
 
 ### RX — receiving and decoding
 
-While the "APRS" menu item is ON the FSK engine is armed for RX (`APRS_RxArm`): sync detector loaded with `0xFEFE` (the NRZI encoding of a run of AX.25 `0x7E` flags), raw bits captured through the FIFO. A software streaming decoder (`APRS_DecodeCapture`) does NRZI decode → flag hunt → bit destuff → FCS check, then `APRS_ShowFrame` parses the position (uncompressed / Mic-E / base-91, ported from F4JTV/aprs_decoder) and shows `SRC 41.15N 27.84E` on the centre line for 30 s.
+While the "APRS" menu item is ON the FSK engine is armed for RX (`APRS_RxArm`): sync detector loaded with `0xFEFE` (the NRZI encoding of a run of AX.25 `0x7E` flags), raw bits captured through the FIFO. A software streaming decoder (`APRS_DecodeCapture`) does NRZI decode → flag hunt → bit destuff → FCS check, then `APRS_ShowFrame` parses the position (uncompressed / Mic-E / base-91, ported from F4JTV/aprs_decoder) and shows the sender plus its **distance from my saved location** (e.g. `SRC 8.3km` / `SRC 850m`) on the centre line for 30 s — never the raw lat/lon. Distance is an integer-only equirectangular estimate (`APRS_DistanceMetres`: 0.11132 m/µdeg × a 5°-step cos(lat) table + 64-bit `APRS_ISqrt64`, ~0.1% vs haversine at VHF range); if no location is set (fresh radio at 0/0) it shows the callsign alone.
 
 Three RX gotchas, all fixed and easy to regress:
 1. **Power save must be disabled while listening** — the sleep cycle reprograms the chip mid-capture (guarded in `app/app.c`).

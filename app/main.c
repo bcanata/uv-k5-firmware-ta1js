@@ -521,6 +521,10 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                 Frequency = frequencyBandTable[BAND_N_ELEM - 1].upper;
             }
 
+#ifdef ENABLE_AMATEUR_BAND_ONLY
+            Frequency = FREQUENCY_SnapToAmateur(Frequency);
+#endif
+
             const FREQUENCY_Band_t band = FREQUENCY_GetBand(Frequency);
 
             if (gTxVfo->Band != band) {

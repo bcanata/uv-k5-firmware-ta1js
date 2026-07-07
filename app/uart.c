@@ -588,12 +588,33 @@ typedef struct {
     char     Text[30];
 } CMD_0700_t;
 
-// 0x0702: transmit a position beacon (no payload).
+// 0x0702: transmit a position beacon from the stored location (no payload).
 typedef struct {
     Header_t Header;
     uint8_t  Ok;
     uint8_t  Padding[3];
 } REPLY_ack_t;
+
+// 0x0704: beacon a supplied position (micro-degrees, e.g. live GPS from a
+// Web Serial / WebUSB page).  acks 0x0705.
+typedef struct {
+    Header_t Header;
+    int32_t  Lat;   // degrees * 1e6
+    int32_t  Lon;   // degrees * 1e6
+} CMD_0704_t;
+
+static void CMD_APRS_BeaconAt(const uint8_t *pBuffer)
+{
+    const CMD_0704_t *pCmd = (const CMD_0704_t *)pBuffer;
+    REPLY_ack_t Reply;
+
+    APRS_BeaconAt(pCmd->Lat, pCmd->Lon);
+
+    Reply.Header.ID   = 0x0705;
+    Reply.Header.Size = sizeof(Reply) - sizeof(Header_t);
+    Reply.Ok          = 1;
+    SendReply(&Reply, sizeof(Reply));
+}
 
 static void CMD_APRS_Send(const uint8_t *pBuffer, bool beacon)
 {
@@ -664,6 +685,10 @@ void UART_HandleCommand(void)
 
         case 0x0702:
             CMD_APRS_Send(UART_Command.Buffer, true);
+            break;
+
+        case 0x0704:
+            CMD_APRS_BeaconAt(UART_Command.Buffer);
             break;
 #endif
 

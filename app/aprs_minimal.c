@@ -209,6 +209,19 @@ static void APRS_TransmitBell202(const uint8_t *frame, uint16_t frame_len)
 char gAPRS_MsgTo[10];
 char gAPRS_MsgText[31];
 
+// The radio must not transmit until the operator has set a real callsign.
+// Empty or the "N0CALL" placeholder counts as unconfigured.
+bool APRS_Configured(void)
+{
+    const char *c = gEeprom.APRS_CALLSIGN;
+    if (c[0] <= ' ')
+        return false;
+    if (c[0] == 'N' && c[1] == '0' && c[2] == 'C' && c[3] == 'A' && c[4] == 'L' && c[5] == 'L' &&
+        (c[6] == 0 || c[6] == ' '))
+        return false;
+    return true;
+}
+
 static uint16_t APRS_BuildHeader(uint8_t *frame)
 {
     // APRS,WIDE1-1,WIDE2-1 path, source callsign/SSID from the menu settings.
@@ -252,22 +265,22 @@ static uint16_t APRS_PosDigits(uint8_t *out, uint32_t v, uint8_t deg3)
     return n;
 }
 
-static void APRS_TransmitBeacon(void)
+static void APRS_TransmitBeaconCoords(int32_t lat_udeg, int32_t lon_udeg)
 {
-    // Position and comment come from the menu settings (Loc / Cmnt).
+    // Build "!DDMM.mmN/DDDMM.mmE>comment" for the given coordinates.
     uint8_t frame[7 * 4 + 2 + 21 + 31 + 2];
     uint16_t idx = APRS_BuildHeader(frame);
     int32_t v;
     char hemi;
 
     frame[idx++] = '!';
-    v = gEeprom.APRS_LATITUDE;
+    v = lat_udeg;
     hemi = 'N';
     if (v < 0) { v = -v; hemi = 'S'; }
     idx += APRS_PosDigits(&frame[idx], (uint32_t)v, 0);
     frame[idx++] = (uint8_t)hemi;
     frame[idx++] = '/';
-    v = gEeprom.APRS_LONGITUDE;
+    v = lon_udeg;
     hemi = 'E';
     if (v < 0) { v = -v; hemi = 'W'; }
     idx += APRS_PosDigits(&frame[idx], (uint32_t)v, 1);
@@ -277,6 +290,12 @@ static void APRS_TransmitBeacon(void)
         frame[idx++] = (uint8_t)gEeprom.APRS_COMMENT[i];
 
     APRS_TxFrame(frame, idx);
+}
+
+static void APRS_TransmitBeacon(void)
+{
+    // Position and comment come from the menu settings (Loc / Cmnt).
+    APRS_TransmitBeaconCoords(gEeprom.APRS_LATITUDE, gEeprom.APRS_LONGITUDE);
 }
 
 // ---------------------------------------------------------------------------
@@ -517,6 +536,96 @@ static char *APRS_FmtCoord(char *p, int32_t micro, char pos, char neg)
     return p;
 }
 
+// ---- Great-circle-ish distance from my saved location (integer only) --------
+// Equirectangular approximation: good to well under 1% at handheld/VHF ranges,
+// and it needs no floating point. Coordinates are micro-degrees.
+//   dy = dlat * 0.11132 m/udeg           (111320 m per degree of latitude)
+//   dx = dlon * 0.11132 m/udeg * cos(lat)
+//   dist = sqrt(dx*dx + dy*dy)
+// 0.11132 is applied as (v * 116728) >> 20; cos(lat) as a scaled-by-32768
+// lookup on 5-degree steps with linear interpolation.
+static const uint16_t APRS_CosTable[19] = {   // cos(0..90 deg step 5) * 32768
+    32767, 32643, 32270, 31651, 30791, 29698, 28378, 26841, 25100, 23170,
+    21063, 18795, 16384, 13848, 11207,  8481,  5690,  2856,     0,
+};
+
+// cos(latitude) scaled by 32768, latitude given in micro-degrees.
+static int32_t APRS_CosScaled(int32_t lat_udeg)
+{
+    uint32_t a = (uint32_t)(lat_udeg < 0 ? -lat_udeg : lat_udeg);
+    if (a >= 90000000u)
+        return 0;
+    const uint32_t seg    = a / 5000000u;          // 0..17
+    const uint32_t within = (a % 5000000u) / 1000u; // 0..4999 (0.001 deg units)
+    const int32_t c0 = APRS_CosTable[seg];
+    const int32_t c1 = APRS_CosTable[seg + 1];
+    return c0 + ((c1 - c0) * (int32_t)within) / 5000;
+}
+
+static uint32_t APRS_ISqrt64(uint64_t n)
+{
+    uint64_t res = 0;
+    uint64_t bit = (uint64_t)1 << 62;
+    while (bit > n)
+        bit >>= 2;
+    while (bit) {
+        if (n >= res + bit) {
+            n   -= res + bit;
+            res  = (res >> 1) + bit;
+        } else {
+            res >>= 1;
+        }
+        bit >>= 2;
+    }
+    return (uint32_t)res;
+}
+
+// Distance in metres between my saved location and (lat,lon). Micro-degrees in.
+static uint32_t APRS_DistanceMetres(int32_t lat, int32_t lon)
+{
+    const int32_t dlat = lat - gEeprom.APRS_LATITUDE;
+    const int32_t dlon = lon - gEeprom.APRS_LONGITUDE;
+    const int32_t meanlat = (lat + gEeprom.APRS_LATITUDE) / 2;
+
+    int64_t dy = ((int64_t)dlat * 116728) >> 20;                       // metres
+    int64_t dx = ((int64_t)dlon * 116728) >> 20;                       // metres @ equator
+    dx = (dx * APRS_CosScaled(meanlat)) >> 15;                         // scale by cos(lat)
+
+    return APRS_ISqrt64((uint64_t)(dx * dx) + (uint64_t)(dy * dy));
+}
+
+// "12.3km" / "850m" for the distance readout. Returns end of string.
+static char *APRS_FmtDistance(char *p, uint32_t metres)
+{
+    uint32_t v;
+    if (metres < 1000u) {                 // metres
+        v = metres;
+        if (v >= 100u) *p++ = (char)('0' + (v / 100u) % 10u);
+        if (v >= 10u)  *p++ = (char)('0' + (v / 10u) % 10u);
+        *p++ = (char)('0' + v % 10u);
+        *p++ = 'm';
+        return p;
+    }
+    if (metres < 100000u) {               // km with one decimal
+        const uint32_t km  = metres / 1000u;
+        const uint32_t dec = (metres % 1000u) / 100u;
+        if (km >= 10u) *p++ = (char)('0' + (km / 10u) % 10u);
+        *p++ = (char)('0' + km % 10u);
+        *p++ = '.';
+        *p++ = (char)('0' + dec);
+    } else {                              // whole km
+        v = metres / 1000u;
+        if (v > 9999u) v = 9999u;
+        if (v >= 1000u) *p++ = (char)('0' + (v / 1000u) % 10u);
+        if (v >= 100u)  *p++ = (char)('0' + (v / 100u) % 10u);
+        if (v >= 10u)   *p++ = (char)('0' + (v / 10u) % 10u);
+        *p++ = (char)('0' + v % 10u);
+    }
+    *p++ = 'k';
+    *p++ = 'm';
+    return p;
+}
+
 // Push a decoded packet out the UART as a plain "APRS:<text>\r\n" line so a PC
 // can monitor traffic (see utils/aprs_pc.py). No-op if UART is disabled.
 static void APRS_EmitMonitor(void)
@@ -625,11 +734,14 @@ static void APRS_ShowFrame(const uint8_t *frame, uint16_t len)
     }
 
     if (have) {
+        // Show distance from my saved location instead of the raw lat/lon.
+        // With no location set (fresh radio at 0/0) distance is meaningless,
+        // so fall back to just the source callsign.
         char *p = &gAPRS_RxDisplay[o];
-        *p++ = ' ';
-        p = APRS_FmtCoord(p, lat, 'N', 'S');
-        *p++ = ' ';
-        p = APRS_FmtCoord(p, lon, 'E', 'W');
+        if (gEeprom.APRS_LATITUDE != 0 || gEeprom.APRS_LONGITUDE != 0) {
+            *p++ = ' ';
+            p = APRS_FmtDistance(p, APRS_DistanceMetres(lat, lon));
+        }
         *p = 0;
     } else {
         gAPRS_RxDisplay[o++] = ':';
@@ -889,6 +1001,16 @@ typedef enum {
 
 static aprs_state_t gAPRSState = APRS_STATE_IDLE;
 
+// Automatic beacon countdown, in 500 ms ticks (0 = no beacon pending).
+static uint16_t gBeaconCountdown_500ms;
+
+// (Re)start the auto-beacon timer: first beacon ~15 s after enabling so the
+// station shows up quickly, then every APRS_INTERVAL minutes. Interval 0 = off.
+void APRS_ResetBeaconTimer(void)
+{
+    gBeaconCountdown_500ms = (gEeprom.APRS_INTERVAL > 0) ? 30u : 0u;
+}
+
 // Initialize APRS system
 void APRS_Init(void)
 {
@@ -905,6 +1027,7 @@ void APRS_Init(void)
     }
 
     gAPRSState = APRS_STATE_IDLE;
+    APRS_ResetBeaconTimer();
 }
 
 // Check if APRS is currently transmitting
@@ -913,11 +1036,10 @@ bool APRS_IsTransmitting(void)
     return (gAPRSState == APRS_STATE_TRANSMITTING);
 }
 
-// Manual transmission trigger (menu TX item). Automatic beaconing is
-// intentionally not implemented - transmissions happen only on user action.
+// Transmit one position beacon (menu TX item and the auto-beacon timer).
 void APRS_TransmitNow(void)
 {
-    if (gAPRSState != APRS_STATE_IDLE)
+    if (gAPRSState != APRS_STATE_IDLE || !APRS_Configured())
         return;
 
     gAPRSState = APRS_STATE_TRANSMITTING;
@@ -929,10 +1051,22 @@ void APRS_TransmitNow(void)
     gAPRSState = APRS_STATE_WAITING;  // APRS_Task re-arms RX afterwards
 }
 
+// Beacon a caller-supplied position (UART 0x0704 / live GPS from the web tool).
+void APRS_BeaconAt(int32_t lat_udeg, int32_t lon_udeg)
+{
+    if (gAPRSState != APRS_STATE_IDLE || !APRS_Configured())
+        return;
+    gAPRSState = APRS_STATE_TRANSMITTING;
+    APRS_StopListening();
+    APRS_TransmitBeaconCoords(lat_udeg, lon_udeg);
+    gAPRSState = APRS_STATE_WAITING;
+}
+
 // Send the composed text message to gAPRS_MsgTo (menu "Send" item)
 void APRS_SendMessage(void)
 {
-    if (gAPRSState != APRS_STATE_IDLE || gAPRS_MsgTo[0] == 0 || gAPRS_MsgText[0] == 0)
+    if (gAPRSState != APRS_STATE_IDLE || !APRS_Configured() ||
+        gAPRS_MsgTo[0] == 0 || gAPRS_MsgText[0] == 0)
         return;
 
     gAPRSState = APRS_STATE_TRANSMITTING;
@@ -972,6 +1106,12 @@ void APRS_Task(void)
     // never fires for real packets: once a capture has been idle for ~1.5 s,
     // decode whatever was collected and re-arm.
     if (gAPRSState == APRS_STATE_IDLE && gCurrentFunction != FUNCTION_TRANSMIT) {
+        // Automatic position beacon at the configured interval (keep-alive).
+        if (gBeaconCountdown_500ms > 0 && --gBeaconCountdown_500ms == 0) {
+            gBeaconCountdown_500ms = (uint16_t)gEeprom.APRS_INTERVAL * 120u;
+            APRS_TransmitNow();  // -> WAITING; RX re-arms after the cooldown
+            return;
+        }
         if (!gRxArmed) {
             APRS_RxArm();
         } else if (gRxCapturing && ++gRxStuckTicks > 2) {

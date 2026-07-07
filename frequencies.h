@@ -18,6 +18,7 @@
 #define FREQUENCIES_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define _1GHz_in_KHz 100000000
 
@@ -89,5 +90,9 @@ uint32_t         FREQUENCY_GetSortedIdxFromStepIdx(uint8_t step);
 
 int32_t          TX_freq_check(uint32_t Frequency);
 int32_t          RX_freq_check(uint32_t Frequency);
+#ifdef ENABLE_AMATEUR_BAND_ONLY
+bool             FREQUENCY_InAmateurBand(uint32_t Frequency);
+uint32_t         FREQUENCY_SnapToAmateur(uint32_t Frequency);
+#endif
 
 #endif

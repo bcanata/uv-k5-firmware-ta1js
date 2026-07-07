@@ -32,11 +32,21 @@ void APRS_Init(void);
 // Manual transmission trigger
 void APRS_TransmitNow(void);
 
+// (Re)start the automatic beacon interval timer (call when APRS/Intv changes)
+void APRS_ResetBeaconTimer(void);
+
+// Beacon a specific position in micro-degrees (UART 0x0704 / live GPS)
+void APRS_BeaconAt(int32_t lat_udeg, int32_t lon_udeg);
+
 // Main APRS task (called from app loop)
 void APRS_Task(void);
 
 // Check if APRS is currently transmitting
 bool APRS_IsTransmitting(void);
+
+// True once the operator has set a real callsign (not empty / not N0CALL);
+// transmit paths refuse to key up until this is true.
+bool APRS_Configured(void);
 
 // RX listen mode (active while the APRS menu item is ON)
 void APRS_HandleRxInterrupts(uint16_t interrupt_bits);

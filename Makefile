@@ -23,6 +23,7 @@ ENABLE_SMALL_BOLD               ?= 0
 ENABLE_CUSTOM_MENU_LAYOUT       ?= 1
 ENABLE_KEEP_MEM_NAME            ?= 1
 ENABLE_WIDE_RX                  ?= 1
+ENABLE_AMATEUR_BAND_ONLY        ?= 1
 ENABLE_TX_WHEN_AM               ?= 0
 ENABLE_F_CAL_MENU               ?= 0
 ENABLE_CTCSS_TAIL_PHASE_SHIFT   ?= 0
@@ -40,7 +41,7 @@ ENABLE_REDUCE_LOW_MID_TX_POWER  ?= 0
 ENABLE_BYP_RAW_DEMODULATORS     ?= 0
 ENABLE_BLMIN_TMP_OFF            ?= 0
 ENABLE_SCAN_RANGES              ?= 1
-ENABLE_APRS                     ?= 0
+ENABLE_APRS                     ?= 1
 
 # ---- CONTRIB MODS ----
 
@@ -365,6 +366,9 @@ ifeq ($(ENABLE_KEEP_MEM_NAME),1)
 endif
 ifeq ($(ENABLE_WIDE_RX),1)
 	CFLAGS  += -DENABLE_WIDE_RX
+endif
+ifeq ($(ENABLE_AMATEUR_BAND_ONLY),1)
+	CFLAGS  += -DENABLE_AMATEUR_BAND_ONLY
 endif
 ifeq ($(ENABLE_TX_WHEN_AM),1)
 	CFLAGS  += -DENABLE_TX_WHEN_AM

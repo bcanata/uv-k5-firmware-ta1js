@@ -408,8 +408,8 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
             *pMax = 1;  // OFF/ON
             break;
         case MENU_APRS_INTV:
-            *pMin = 1;
-            *pMax = 60;  // 1-60 minutes
+            *pMin = 0;
+            *pMax = 60;  // 0 = beacon off, 1-60 minutes
             break;
         case MENU_APRS_SSID:
             *pMax = 15;  // SSID 0-15
@@ -939,9 +939,11 @@ void MENU_AcceptSetting(void)
 #ifdef ENABLE_APRS
         case MENU_APRS_ON:
             gEeprom.APRS_ON = gSubMenuSelection;
+            APRS_ResetBeaconTimer();
             break;
         case MENU_APRS_INTV:
             gEeprom.APRS_INTERVAL = gSubMenuSelection;
+            APRS_ResetBeaconTimer();
             break;
         case MENU_APRS_CALL:
             // Sanitize callsign: A-Z/0-9, stop at '_' padding or space.

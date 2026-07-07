@@ -9,6 +9,7 @@ compile_commands.json
 .vscode
 /docs/*
 !/docs/bk4819/
+!/docs/APRS.md
 k5_eeprom.raw
 .DS_Store
 K5TOOL.log*

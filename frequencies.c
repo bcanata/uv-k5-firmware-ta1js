@@ -169,6 +169,11 @@ int32_t TX_freq_check(const uint32_t Frequency)
     if (Frequency >= BX4819_band1.upper && Frequency < BX4819_band2.lower)
         return -1;  // BX chip does not work in this range
 
+#ifdef ENABLE_AMATEUR_BAND_ONLY
+    if (!FREQUENCY_InAmateurBand(Frequency))
+        return -1;  // TX only inside amateur allocations
+#endif
+
     switch (gSetting_F_LOCK)
     {
         case F_LOCK_DEF:
@@ -275,6 +280,43 @@ int32_t TX_freq_check(const uint32_t Frequency)
     return -1;
 }
 
+#ifdef ENABLE_AMATEUR_BAND_ONLY
+// Turkey amateur allocations that the radio can actually reach (units of 10 Hz),
+// derived from the Milli Frekans Planı. 70cm is kept as the full 430-440 MHz
+// block (practical amateur use) rather than the plan's fragmented sub-ranges.
+static const freq_band_table_t amateurBands[] = {
+    {  1806800,   1816800 },  // 17m  18.068 - 18.168 MHz
+    {  2100000,   2145000 },  // 15m  21.000 - 21.450
+    {  2489000,   2499000 },  // 12m  24.890 - 24.990
+    {  2800000,   2970000 },  // 10m  28.000 - 29.700
+    {  5000000,   5200000 },  // 6m   50.000 - 52.000
+    { 14400000,  14600000 },  // 2m  144.000 - 146.000
+    { 43000000,  44000000 },  // 70cm 430.000 - 440.000
+    {124000000, 130000000 },  // 23cm 1240 - 1300
+};
+
+bool FREQUENCY_InAmateurBand(uint32_t f)
+{
+    for (uint32_t i = 0; i < ARRAY_SIZE(amateurBands); i++)
+        if (f >= amateurBands[i].lower && f <= amateurBands[i].upper)
+            return true;
+    return false;
+}
+
+uint32_t FREQUENCY_SnapToAmateur(uint32_t f)
+{   // return f if already in a band, else the nearest amateur band edge
+    uint32_t best = amateurBands[0].lower, bestd = 0xFFFFFFFF;
+    for (uint32_t i = 0; i < ARRAY_SIZE(amateurBands); i++) {
+        if (f >= amateurBands[i].lower && f <= amateurBands[i].upper)
+            return f;
+        const uint32_t edge = (f < amateurBands[i].lower) ? amateurBands[i].lower : amateurBands[i].upper;
+        const uint32_t d    = (edge > f) ? edge - f : f - edge;
+        if (d < bestd) { bestd = d; best = edge; }
+    }
+    return best;
+}
+#endif
+
 int32_t RX_freq_check(const uint32_t Frequency)
 {   // return '0' if RX frequency is allowed
     // otherwise return '-1'
@@ -284,6 +326,11 @@ int32_t RX_freq_check(const uint32_t Frequency)
 
     if (Frequency >= BX4819_band1.upper && Frequency < BX4819_band2.lower)
         return -1;
+
+#ifdef ENABLE_AMATEUR_BAND_ONLY
+    if (!FREQUENCY_InAmateurBand(Frequency))
+        return -1;
+#endif
 
     return 0;   // OK frequency
 }
