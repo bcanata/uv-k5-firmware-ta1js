@@ -162,12 +162,13 @@ static void APRS_TransmitBell202(const uint8_t *frame, uint16_t frame_len)
     BK4819_WriteRegister(BK4819_REG_2B, (1u << 2) | (1u << 0));        // TX HPF + pre-emphasis off
 
     // REG_70: <15> tone1 enable, <14:8> tone1 gain, <7> tone2 enable, <6:0>
-    // tone2 gain. Both gains must be equal - leaving tone1's field at 0 makes
-    // the 2200 Hz space tone come out well below the 1200 Hz mark tone
-    // (Bell 202 "twist"). Software modems normalise that away, hardware TNCs
-    // (Kenwood TH-D7x) often fail to lock on it.
-    BK4819_WriteRegister(BK4819_REG_70,
-        (1u << 15) | (96u << 8) | (1u << 7) | (96u << 0));
+    // tone2 gain. Tone1's gain field stays 0 on purpose: REG_71 only uses
+    // tone1 as the 2200 Hz *frequency* reference for the FSK engine, and
+    // giving it amplitude lays a continuous 2200 Hz tone over the modulation -
+    // measured on 2026-07-25, nothing decodes at all with the gain set. Only
+    // tone2 (1200 Hz, the bit clock) carries amplitude.
+    BK4819_WriteRegister(BK4819_REG_70,          // tone1 freq ref + tone2 gain 96
+        (1u << 15) | (1u << 7) | (96u << 0));
     BK4819_WriteRegister(BK4819_REG_71, 22714);  // tone1: 2200 Hz (space)
     BK4819_WriteRegister(BK4819_REG_72, 12389);  // tone2: 1200 Hz (mark / bit clock)
 
