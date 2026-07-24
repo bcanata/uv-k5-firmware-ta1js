@@ -52,7 +52,7 @@ Flags:
 | SSID | 0–15 |
 | Loc  | 15-digit location code (generate it with the web tool below) |
 | Cmnt | Beacon comment |
-| MsgTo| Message destination callsign |
+| MsgTo| Message destination, **callsign *and* SSID** (e.g. `VA3EMQ-7`) |
 | Msg  | Message text |
 | Send | Transmit the message to MsgTo |
 | TX   | Transmit one position beacon now |
@@ -63,6 +63,22 @@ Flags:
 
 Callsign/SSID/location/message-target persist in EEPROM; comment and message
 text reset to defaults on power-up.
+
+### Messaging details
+
+- **MsgTo must carry the other station's SSID.** A message to `VA3EMQ` is not a
+  message to `VA3EMQ-7`: the receiving radio compares the address against its
+  own callsign *including* the SSID and silently ignores anything else — the
+  packet is received and decoded, it just never appears as a message. The `-`
+  is code `37` in the two-digit entry above.
+- **Replying is automatic:** when a message addressed to you arrives, MsgTo is
+  set to the sender's full callsign-SSID (exactly as shown in the message box),
+  so a reply only needs Msg + Send. This is RAM only — the stored MsgTo comes
+  back on the next power-up.
+- **Line numbers and acknowledgements:** outgoing messages carry a `{nn` line
+  number, so the receiving station acknowledges them. The ack arrives as
+  `THEIRCALL-n>ackNN` in the message box — that is the delivery confirmation.
+  Incoming numbered messages are acked automatically within ~0.5 s.
 
 ## Companion tools (open source, in `utils/`)
 

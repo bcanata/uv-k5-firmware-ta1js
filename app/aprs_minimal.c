@@ -161,8 +161,13 @@ static void APRS_TransmitBell202(const uint8_t *frame, uint16_t frame_len)
     BK4819_WriteRegister(BK4819_REG_40, (dev_val & 0xF000u) | 1200u);  // tone deviation ~3 kHz
     BK4819_WriteRegister(BK4819_REG_2B, (1u << 2) | (1u << 0));        // TX HPF + pre-emphasis off
 
-    BK4819_WriteRegister(BK4819_REG_70,          // both tone generators on, gain 96
-        (1u << 15) | (1u << 7) | (96u << 0));
+    // REG_70: <15> tone1 enable, <14:8> tone1 gain, <7> tone2 enable, <6:0>
+    // tone2 gain. Both gains must be equal - leaving tone1's field at 0 makes
+    // the 2200 Hz space tone come out well below the 1200 Hz mark tone
+    // (Bell 202 "twist"). Software modems normalise that away, hardware TNCs
+    // (Kenwood TH-D7x) often fail to lock on it.
+    BK4819_WriteRegister(BK4819_REG_70,
+        (1u << 15) | (96u << 8) | (1u << 7) | (96u << 0));
     BK4819_WriteRegister(BK4819_REG_71, 22714);  // tone1: 2200 Hz (space)
     BK4819_WriteRegister(BK4819_REG_72, 12389);  // tone2: 1200 Hz (mark / bit clock)
 
@@ -208,6 +213,15 @@ static void APRS_TransmitBell202(const uint8_t *frame, uint16_t frame_len)
 // Message compose fields (edited via the menu, RAM only)
 char gAPRS_MsgTo[10];
 char gAPRS_MsgText[31];
+
+// Message line numbers: outgoing "{nn" counter, plus the pending acknowledgement
+// for the last numbered message addressed to us (sent from APRS_Task).
+#define APRS_MSG_MAX     34u   // 30 chars of text + "{nn" / "ack" + line number
+#define APRS_ACK_SEQ_MAX  5u   // spec allows up to 5 characters
+static uint8_t gAPRS_MsgSeq;
+static char    gAPRS_AckTo[10];
+static char    gAPRS_AckSeq[APRS_ACK_SEQ_MAX + 1];
+static bool    gAPRS_AckPending;
 
 // The radio must not transmit until the operator has set a real callsign.
 // Empty or the "N0CALL" placeholder counts as unconfigured.
@@ -637,6 +651,29 @@ static void APRS_EmitMonitor(void)
 #endif
 }
 
+// Push the full decoded AX.25 frame (addresses + control + PID + info, FCS
+// stripped) out the UART as "APRSRAW:<hex>\r\n". A PC/web client decodes it
+// into the TNC2 monitor line + parsed details. Emitted for every valid frame,
+// even ones the radio's own display suppresses, so it doubles as a monitor.
+static void APRS_EmitRaw(const uint8_t *frame, uint16_t len)
+{
+#ifdef ENABLE_UART
+    static const char hex[16] = "0123456789ABCDEF";
+    char buf[160];
+    uint16_t n = (len > 2u) ? (uint16_t)(len - 2u) : 0u;  // drop the 2-byte FCS
+    if (n > 78u)
+        n = 78u;
+    uint16_t o = 0;
+    for (uint16_t i = 0; i < n; i++) {
+        buf[o++] = hex[(frame[i] >> 4) & 0x0F];
+        buf[o++] = hex[frame[i] & 0x0F];
+    }
+    UART_Send("APRSRAW:", 8);
+    UART_Send(buf, o);
+    UART_Send("\r\n", 2);
+#endif
+}
+
 // "41.15N\n27.84E" for the Loc menu display (two lines)
 void APRS_FormatLatLon(char *out)
 {
@@ -648,6 +685,8 @@ void APRS_FormatLatLon(char *out)
 
 static void APRS_ShowFrame(const uint8_t *frame, uint16_t len)
 {
+    APRS_EmitRaw(frame, len);  // full raw frame to UART for PC/web decode
+
     // find the last address field (bit0 of the SSID byte set)
     uint16_t a = 6;
     while (a + 7 < len && (frame[a] & 1u) == 0)
@@ -701,14 +740,41 @@ static void APRS_ShowFrame(const uint8_t *frame, uint16_t len)
     }
 
     if (tome) {
-        // keep on screen until dismissed with EXIT
+        // An incoming "ack"/"rej" is a reply to something we sent: show it, but
+        // never acknowledge it and never touch the reply target.
+        const bool isack = (ilen >= 14 &&
+                            ((ip[11] == 'a' && ip[12] == 'c' && ip[13] == 'k') ||
+                             (ip[11] == 'r' && ip[12] == 'e' && ip[13] == 'j')));
+        if (!isack) {
+            // Reply target: the sender's full callsign-SSID, so the operator
+            // only has to type the text (getting the SSID wrong here is the
+            // usual reason the other station silently ignores the message).
+            uint8_t k = 0;
+            for (; k < o && k < 9; k++)
+                gAPRS_AckTo[k] = gAPRS_RxDisplay[k];
+            gAPRS_AckTo[k] = 0;
+            memcpy(gAPRS_MsgTo, gAPRS_AckTo, (uint8_t)(k + 1));
+        }
+
+        // pop the overlay box; auto-times out, or any key dismisses it early
         gAPRS_RxDisplay[o++] = '>';
         for (uint16_t i = 11; i < ilen && o < sizeof(gAPRS_RxDisplay) - 1; i++) {
             const char c = (char)ip[i];
+            if (c == '{') {  // "{nn" line number: acknowledge it, don't display it
+                if (!isack) {
+                    uint8_t k = 0;
+                    for (uint16_t j = i + 1; j < ilen && k < APRS_ACK_SEQ_MAX; j++)
+                        gAPRS_AckSeq[k++] = (char)ip[j];
+                    gAPRS_AckSeq[k]  = 0;
+                    gAPRS_AckPending = (k > 0);
+                }
+                break;
+            }
             gAPRS_RxDisplay[o++] = (c >= 32 && c < 127) ? c : '.';
         }
         gAPRS_RxDisplay[o] = 0;
         gAPRS_RxSticky = true;
+        gAPRS_RxDisplayTimer = 60;   // 30 s, then VFO B is redrawn
         gUpdateDisplay = true;
         APRS_EmitMonitor();
         AUDIO_PlayBeep(BEEP_880HZ_60MS_DOUBLE_BEEP);
@@ -1062,7 +1128,32 @@ void APRS_BeaconAt(int32_t lat_udeg, int32_t lon_udeg)
     gAPRSState = APRS_STATE_WAITING;
 }
 
-// Send the composed text message to gAPRS_MsgTo (menu "Send" item)
+// ":ADDRESSEE:text" - addressee is always padded to exactly 9 characters, as
+// every decoder (and the APRS spec) requires. Shared by the menu "Send" item
+// and the automatic acknowledgement.
+static void APRS_TxMessage(const char *to, const char *text)
+{
+    uint8_t frame[7 * 4 + 2 + 1 + 9 + 1 + APRS_MSG_MAX + 2];
+    uint16_t idx = APRS_BuildHeader(frame);
+    frame[idx++] = ':';
+    {
+        uint8_t end = 0;
+        for (uint8_t i = 0; i < 9; i++) {
+            if (!end && to[i] == 0)
+                end = 1;
+            frame[idx++] = end ? ' ' : (uint8_t)to[i];
+        }
+    }
+    frame[idx++] = ':';
+    for (uint8_t i = 0; i < APRS_MSG_MAX && text[i]; i++)
+        frame[idx++] = (uint8_t)text[i];
+    APRS_TxFrame(frame, idx);
+}
+
+// Send the composed text message to gAPRS_MsgTo (menu "Send" item).
+// A "{nn" line number is appended so the receiving station acknowledges it -
+// Kenwood and most software only ack numbered messages, and that ack is our
+// only delivery confirmation.
 void APRS_SendMessage(void)
 {
     if (gAPRSState != APRS_STATE_IDLE || !APRS_Configured() ||
@@ -1072,32 +1163,45 @@ void APRS_SendMessage(void)
     gAPRSState = APRS_STATE_TRANSMITTING;
     APRS_StopListening();
 
-    uint8_t frame[7 * 4 + 2 + 1 + 9 + 1 + 30 + 2];
-    uint16_t idx = APRS_BuildHeader(frame);
-    frame[idx++] = ':';
-    {
-        uint8_t end = 0;
-        for (uint8_t i = 0; i < 9; i++) {
-            if (!end && gAPRS_MsgTo[i] == 0)
-                end = 1;
-            frame[idx++] = end ? ' ' : (uint8_t)gAPRS_MsgTo[i];
-        }
-    }
-    frame[idx++] = ':';
-    for (uint8_t i = 0; i < 30 && gAPRS_MsgText[i]; i++)
-        frame[idx++] = (uint8_t)gAPRS_MsgText[i];
-    APRS_TxFrame(frame, idx);
+    char text[APRS_MSG_MAX + 1];
+    uint8_t k = 0;
+    for (; k < 30 && gAPRS_MsgText[k]; k++)
+        text[k] = gAPRS_MsgText[k];
+    if (++gAPRS_MsgSeq > 99)
+        gAPRS_MsgSeq = 1;
+    text[k++] = '{';
+    text[k++] = (char)('0' + gAPRS_MsgSeq / 10);
+    text[k++] = (char)('0' + gAPRS_MsgSeq % 10);
+    text[k]   = 0;
+    APRS_TxMessage(gAPRS_MsgTo, text);
 
+    gAPRSState = APRS_STATE_WAITING;
+}
+
+// Acknowledge a received numbered message: ":SENDER   :ackNN"
+static void APRS_SendAck(void)
+{
+    char text[3 + APRS_ACK_SEQ_MAX + 1];
+    text[0] = 'a'; text[1] = 'c'; text[2] = 'k';
+    uint8_t k = 3;
+    for (uint8_t i = 0; i < APRS_ACK_SEQ_MAX && gAPRS_AckSeq[i]; i++)
+        text[k++] = gAPRS_AckSeq[i];
+    text[k] = 0;
+
+    gAPRSState = APRS_STATE_TRANSMITTING;
+    APRS_StopListening();
+    APRS_TxMessage(gAPRS_AckTo, text);
     gAPRSState = APRS_STATE_WAITING;
 }
 
 // Main APRS task (called from the 500ms app loop while APRS is ON)
 void APRS_Task(void)
 {
-    // Expire the RX packet display (sticky messages wait for EXIT instead)
-    if (!gAPRS_RxSticky &&
-        gAPRS_RxDisplayTimer > 0 && --gAPRS_RxDisplayTimer == 0) {
+    // Expire the RX packet display / message overlay. When a message times
+    // out we also drop the sticky flag so UI_DisplayMain redraws VFO B.
+    if (gAPRS_RxDisplayTimer > 0 && --gAPRS_RxDisplayTimer == 0) {
         gAPRS_RxDisplay[0] = 0;
+        gAPRS_RxSticky = false;
         gUpdateDisplay = true;
     }
 
@@ -1106,6 +1210,14 @@ void APRS_Task(void)
     // never fires for real packets: once a capture has been idle for ~1.5 s,
     // decode whatever was collected and re-arm.
     if (gAPRSState == APRS_STATE_IDLE && gCurrentFunction != FUNCTION_TRANSMIT) {
+        // Acknowledge a numbered message addressed to us (queued by the decoder).
+        if (gAPRS_AckPending) {
+            gAPRS_AckPending = false;
+            if (APRS_Configured() && gAPRS_AckTo[0]) {
+                APRS_SendAck();  // -> WAITING; RX re-arms after the cooldown
+                return;
+            }
+        }
         // Automatic position beacon at the configured interval (keep-alive).
         if (gBeaconCountdown_500ms > 0 && --gBeaconCountdown_500ms == 0) {
             gBeaconCountdown_500ms = (uint16_t)gEeprom.APRS_INTERVAL * 120u;
