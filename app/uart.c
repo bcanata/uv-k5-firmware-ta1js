@@ -764,10 +764,14 @@ static void CMD_0B05_SetModulation(const uint8_t *pBuffer)
     RC_Ack(0x0B05, 1);
 }
 
-// 0x0A03: push one raw display frame.  Marker 0xAB 0xED then the live 1024-byte
-// paged framebuffer (gStatusLine = page 0, gFrameBuffer = pages 1..7).  Runs
-// inside the IRQ-disabled command handler, so the buffers are stable.  Not
-// obfuscated / not CRC-framed -- the host reads it as a raw push (see the spec).
+// 0x0A03 (WITHDRAWN): push one raw display frame - marker 0xAB 0xED then the
+// live 1024-byte paged framebuffer (gStatusLine = page 0, gFrameBuffer = pages
+// 1..7).  Kept commented out on purpose: UART_Send() busy-waits per byte, and
+// the command handler runs under __disable_irq(), so one frame blocks all
+// interrupts for ~270 ms at 38400 baud.  Polling it shreds the APRS FSK RX
+// capture (missed FIFO-almost-full / RX-finished interrupts).  Do not re-enable
+// without moving the push out of the IRQ-disabled path.
+#if 0
 static void CMD_0A03_Screen(void)
 {
     static const uint8_t marker[2] = { 0xAB, 0xED };
@@ -775,6 +779,7 @@ static void CMD_0A03_Screen(void)
     UART_Send(gStatusLine, LCD_WIDTH);                 // 128 bytes
     UART_Send(gFrameBuffer, FRAME_LINES * LCD_WIDTH);  // 896 bytes
 }
+#endif
 #endif  // ENABLE_UART_RC
 
 void UART_HandleCommand(void)
@@ -834,9 +839,10 @@ void UART_HandleCommand(void)
 #endif
 
 #ifdef ENABLE_UART_RC
-        case 0x0A03:
-            CMD_0A03_Screen();
-            break;
+        // 0x0A03 display mirror withdrawn - see CMD_0A03_Screen above.
+        // case 0x0A03:
+        //     CMD_0A03_Screen();
+        //     break;
 
         case 0x0B01:
             CMD_0B01_InjectKey(UART_Command.Buffer);
