@@ -403,6 +403,9 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 
 #ifdef ENABLE_APRS
         case MENU_APRS_ON:
+#ifdef ENABLE_APRS_DIGI
+        case MENU_APRS_DIGI:
+#endif
         case MENU_APRS_TX:
         case MENU_APRS_MSGSND:
             *pMax = 1;  // OFF/ON
@@ -941,6 +944,11 @@ void MENU_AcceptSetting(void)
             gEeprom.APRS_ON = gSubMenuSelection;
             APRS_ResetBeaconTimer();
             break;
+#ifdef ENABLE_APRS_DIGI
+        case MENU_APRS_DIGI:
+            gAPRS_DIGI = (gSubMenuSelection != 0);
+            break;
+#endif
         case MENU_APRS_INTV:
             gEeprom.APRS_INTERVAL = gSubMenuSelection;
             APRS_ResetBeaconTimer();
@@ -1124,6 +1132,9 @@ void MENU_AcceptSetting(void)
 
 #ifdef ENABLE_APRS
     switch (UI_MENU_GetCurrentMenuId()) {
+#ifdef ENABLE_APRS_DIGI
+        case MENU_APRS_DIGI:
+#endif
         case MENU_APRS_ON:   case MENU_APRS_INTV: case MENU_APRS_CALL:
         case MENU_APRS_SSID:  case MENU_APRS_LOC: case MENU_APRS_CMNT:
         case MENU_APRS_MSGTO: case MENU_APRS_MSGTXT:
@@ -1440,6 +1451,11 @@ void MENU_ShowCurrentSetting(void)
         case MENU_APRS_ON:
             gSubMenuSelection = gEeprom.APRS_ON;
             break;
+#ifdef ENABLE_APRS_DIGI
+        case MENU_APRS_DIGI:
+            gSubMenuSelection = gAPRS_DIGI;
+            break;
+#endif
         case MENU_APRS_INTV:
             gSubMenuSelection = gEeprom.APRS_INTERVAL;
             break;

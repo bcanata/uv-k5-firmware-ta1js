@@ -162,6 +162,9 @@ enum
 #ifdef ENABLE_APRS
     ,
     MENU_APRS_ON,
+#ifdef ENABLE_APRS_DIGI
+    MENU_APRS_DIGI,
+#endif
     MENU_APRS_INTV,
     MENU_APRS_CALL,
     MENU_APRS_SSID,

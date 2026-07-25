@@ -48,6 +48,9 @@ const t_menu_item MenuList[] =
 #ifdef ENABLE_APRS
     // APRS menu items
     {"APRS",    MENU_APRS_ON        },
+#ifdef ENABLE_APRS_DIGI
+    {"Digi",    MENU_APRS_DIGI      },
+#endif
     {"Intv",    MENU_APRS_INTV      },
     {"Call",    MENU_APRS_CALL      },
     {"SSID",    MENU_APRS_SSID      },
@@ -1190,6 +1193,9 @@ void UI_DisplayMenu(void)
 
 #ifdef ENABLE_APRS
         case MENU_APRS_ON:
+#ifdef ENABLE_APRS_DIGI
+        case MENU_APRS_DIGI:
+#endif
             strcpy(String, gSubMenu_OFF_ON[gSubMenuSelection]);
             break;
         case MENU_APRS_TX:      // one-shot actions: MENU fires them, no OFF/ON

@@ -848,6 +848,101 @@ static void APRS_ShowFrame(const uint8_t *frame, uint16_t len)
     AUDIO_PlayBeep(BEEP_1KHZ_60MS_OPTIONAL);
 }
 
+#ifdef ENABLE_APRS_DIGI
+// ---------------------------------------------------------------------------
+// Fill-in digipeater (build flag ENABLE_APRS_DIGI, runtime menu item "Digi").
+//
+// Deliberately the least intrusive role: only a *first unused* WIDE1-1 hop is
+// repeated, using callsign substitution (WIDE1-1 -> MYCALL*). That keeps the
+// frame byte-for-byte the same length, so it is retransmitted in place with
+// only the FCS recomputed - no second frame buffer beyond the queued copy.
+//
+// Not built into shipped images: this radio transmits FFSK 1200/1800 rather
+// than Bell 202 1200/2200, so a repeat is decodable by software modems but not
+// by a hardware TNC. Useful inside a group running this firmware; not a
+// substitute for real infrastructure.
+// ---------------------------------------------------------------------------
+bool gAPRS_DIGI;                    // runtime on/off, persisted at EEPROM State[14]
+
+#define DIGI_SEEN  4u               // recent-packet memory (loop protection)
+#define DIGI_TTL   60u              // 60 x 500 ms APRS_Task ticks = 30 s
+
+static uint8_t  gDigiFrame[sizeof(gRxFrame)];
+static uint16_t gDigiLen;           // 0 = nothing queued for transmission
+static uint16_t gDigiSeen[DIGI_SEEN];
+static uint8_t  gDigiAge[DIGI_SEEN];
+
+static void APRS_DigiAge(void)
+{
+    for (uint8_t i = 0; i < DIGI_SEEN; i++)
+        if (gDigiAge[i] > 0)
+            gDigiAge[i]--;
+}
+
+// Did we already repeat this source+payload recently? Remembers it if not.
+static bool APRS_DigiDuplicate(const uint8_t *frame, uint16_t len, uint16_t info)
+{
+    const uint16_t key = (uint16_t)(APRS_CalculateCRC(&frame[7], 7) ^
+                                    APRS_CalculateCRC(&frame[info], (uint16_t)(len - 2u - info)));
+    uint8_t oldest = 0;
+    for (uint8_t i = 0; i < DIGI_SEEN; i++) {
+        if (gDigiAge[i] > 0 && gDigiSeen[i] == key)
+            return true;
+        if (gDigiAge[i] < gDigiAge[oldest])
+            oldest = i;
+    }
+    gDigiSeen[oldest] = key;
+    gDigiAge[oldest]  = DIGI_TTL;
+    return false;
+}
+
+// Queue a received frame for repeating, if it asks to be and we are allowed to.
+static void APRS_DigiConsider(const uint8_t *frame, uint16_t len)
+{
+    if (!gAPRS_DIGI || gDigiLen != 0 || !APRS_Configured() || len < 23u)
+        return;
+    if (frame[13] & 1u)
+        return;                     // source is the last address: no path to act on
+
+    uint8_t me[7];
+    AX25_EncodeAddress(gEeprom.APRS_CALLSIGN, gEeprom.APRS_SSID & 0x0F, false, me);
+    if (memcmp(&frame[7], me, 6) == 0)
+        return;                     // never repeat our own transmissions
+
+    // end of the address block, so we know where the info field starts
+    uint16_t s = 6;
+    while (s + 7u < len && (frame[s] & 1u) == 0)
+        s += 7u;
+    const uint16_t info = s + 3u;
+    if (info >= len - 2u)
+        return;
+
+    // walk the digipeater hops; only the first *unused* one may claim the frame
+    for (uint16_t a = 20; a <= s; a += 7u) {
+        if (frame[a] & 0x80u) {     // already repeated by someone else
+            if (frame[a] & 1u)
+                break;
+            continue;
+        }
+        if (((frame[a] >> 1) & 0x0Fu) != 1u)
+            return;                 // unused hop, but not a -1: not ours to fill in
+        static const char WIDE1[6] = { 'W', 'I', 'D', 'E', '1', ' ' };
+        for (uint8_t k = 0; k < 6; k++)
+            if ((char)(frame[a - 6u + k] >> 1) != WIDE1[k])
+                return;             // some other alias (WIDE2-2, a callsign, ...)
+        if (APRS_DigiDuplicate(frame, len, info))
+            return;
+
+        memcpy(gDigiFrame, frame, len);
+        memcpy(&gDigiFrame[a - 6u], me, 6);                   // WIDE1-1 -> MYCALL
+        gDigiFrame[a] = (uint8_t)(0x80u | 0x60u |             // H bit: hop used up
+                                  ((gEeprom.APRS_SSID & 0x0Fu) << 1) | (frame[a] & 1u));
+        gDigiLen = len;
+        return;
+    }
+}
+#endif  // ENABLE_APRS_DIGI
+
 static bool APRS_DecodeCapture(void)
 {
     uint8_t  prev = 0, ones = 0;
@@ -887,6 +982,10 @@ static bool APRS_DecodeCapture(void)
                     const uint16_t len = fb >> 3;
                     const uint16_t fcs = AX25_CalculateFCS(gRxFrame, len - 2u);
                     if (fcs == (uint16_t)(gRxFrame[len - 2] | (gRxFrame[len - 1] << 8))) {
+#ifdef ENABLE_APRS_DIGI
+                        // before the display logic, which has its own early exits
+                        APRS_DigiConsider(gRxFrame, len);
+#endif
                         APRS_ShowFrame(gRxFrame, len);
                         return true;
                     }
@@ -1227,6 +1326,9 @@ static void APRS_SendAck(void)
 // Main APRS task (called from the 500ms app loop while APRS is ON)
 void APRS_Task(void)
 {
+#ifdef ENABLE_APRS_DIGI
+    APRS_DigiAge();
+#endif
     // Expire the RX packet display / message overlay. When a message times
     // out we also drop the sticky flag so UI_DisplayMain redraws VFO B.
     if (gAPRS_RxDisplayTimer > 0 && --gAPRS_RxDisplayTimer == 0) {
@@ -1240,6 +1342,19 @@ void APRS_Task(void)
     // never fires for real packets: once a capture has been idle for ~1.5 s,
     // decode whatever was collected and re-arm.
     if (gAPRSState == APRS_STATE_IDLE && gCurrentFunction != FUNCTION_TRANSMIT) {
+#ifdef ENABLE_APRS_DIGI
+        // Repeat a frame the digipeater claimed. The queued copy already has the
+        // path rewritten; APRS_TxFrame recomputes the FCS over it in place.
+        if (gDigiLen > 0) {
+            const uint16_t n = gDigiLen;
+            gDigiLen = 0;
+            gAPRSState = APRS_STATE_TRANSMITTING;
+            APRS_StopListening();
+            APRS_TxFrame(gDigiFrame, (uint16_t)(n - 2u));
+            gAPRSState = APRS_STATE_WAITING;
+            return;
+        }
+#endif
         // Acknowledge a numbered message addressed to us (queued by the decoder).
         if (gAPRS_AckPending) {
             gAPRS_AckPending = false;

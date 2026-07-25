@@ -609,6 +609,9 @@ void SETTINGS_SaveVfoIndices(void)
 #define APRS_EE_B 0x0F20
 
 extern char gAPRS_MsgTo[10];
+#ifdef ENABLE_APRS_DIGI
+extern bool gAPRS_DIGI;
+#endif
 extern char gAPRS_MsgText[31];
 
 void SETTINGS_SaveAPRS(void)
@@ -623,6 +626,9 @@ void SETTINGS_SaveAPRS(void)
     memcpy(&State[10], &gEeprom.APRS_LATITUDE,  sizeof(int32_t));
     memcpy(&State[16], &gEeprom.APRS_LONGITUDE, sizeof(int32_t));
     memcpy(&State[20], gAPRS_MsgTo, 10);
+#ifdef ENABLE_APRS_DIGI
+    State[14] = gAPRS_DIGI ? 1 : 0;   // one of the four documented spare bytes
+#endif
 
     EEPROM_WriteBuffer(APRS_EE_A + 0, &State[0]);
     EEPROM_WriteBuffer(APRS_EE_A + 8, &State[8]);
@@ -655,6 +661,9 @@ void SETTINGS_LoadAPRS(void)
         memcpy(&gEeprom.APRS_LONGITUDE, &State[16], sizeof(int32_t));
         memcpy(gAPRS_MsgTo, &State[20], 10);
         gAPRS_MsgTo[9] = 0;
+#ifdef ENABLE_APRS_DIGI
+        gAPRS_DIGI = (State[14] == 1);   // 0xFF on radios saved before this build
+#endif
         if ((uint8_t)gAPRS_MsgTo[0] == 0xFF)
             gAPRS_MsgTo[0] = 0;
     } else {

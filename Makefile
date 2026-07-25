@@ -42,6 +42,18 @@ ENABLE_BYP_RAW_DEMODULATORS     ?= 0
 ENABLE_BLMIN_TMP_OFF            ?= 0
 ENABLE_SCAN_RANGES              ?= 1
 ENABLE_APRS                     ?= 1
+# Fill-in digipeater. OFF for shipped images on purpose: this radio transmits
+# FFSK 1200/1800, not Bell 202, so repeats are decodable by software modems but
+# not by hardware TNCs — fine for a closed group, not for public infrastructure.
+# Build your own with: make ENABLE_APRS_DIGI=1 (all-band only, see below).
+ENABLE_APRS_DIGI                ?= 0
+ifeq ($(ENABLE_APRS_DIGI),1)
+    # The digipeater costs ~540 bytes and neither image has that spare, so the
+    # build pays for it by dropping AM broadcast gain compensation — the least
+    # useful thing on a radio dedicated to packet. Even then it only fits the
+    # all-band image; ENABLE_AMATEUR_BAND_ONLY=1 still overflows by ~200 bytes.
+    ENABLE_AM_FIX := 0
+endif
 
 # ---- CONTRIB MODS ----
 
@@ -402,6 +414,9 @@ ifeq ($(ENABLE_AM_FIX),1)
 endif
 ifeq ($(ENABLE_APRS),1)
 	CFLAGS  += -DENABLE_APRS
+endif
+ifeq ($(ENABLE_APRS_DIGI),1)
+	CFLAGS  += -DENABLE_APRS_DIGI
 endif
 ifeq ($(ENABLE_AM_FIX_SHOW_DATA),1)
 	CFLAGS  += -DENABLE_AM_FIX_SHOW_DATA

@@ -227,6 +227,145 @@ static int TP_UnwrapAndMatch(const char *infostr, const char *mycall, int myssid
     return tome;
 }
 
+// ---- fill-in digipeater (mirror of APRS_DigiConsider in app/aprs_minimal.c) ----
+#define DIGI_SEEN 4u
+#define DIGI_TTL  60u
+static uint8_t  gDigiFrame[80];
+static uint16_t gDigiLen;
+static uint16_t gDigiSeen[DIGI_SEEN];
+static uint8_t  gDigiAge[DIGI_SEEN];
+static char     gMyCall[7] = "TA1JS";
+static uint8_t  gMySsid    = 7;
+static bool     gAPRS_DIGI = true;
+
+static bool DigiDuplicate(const uint8_t *frame, uint16_t len, uint16_t info)
+{
+    const uint16_t key = (uint16_t)(APRS_CalculateCRC(&frame[7], 7) ^
+                                    APRS_CalculateCRC(&frame[info], (uint16_t)(len - 2u - info)));
+    uint8_t oldest = 0;
+    for (uint8_t i = 0; i < DIGI_SEEN; i++) {
+        if (gDigiAge[i] > 0 && gDigiSeen[i] == key) return true;
+        if (gDigiAge[i] < gDigiAge[oldest]) oldest = i;
+    }
+    gDigiSeen[oldest] = key;
+    gDigiAge[oldest]  = DIGI_TTL;
+    return false;
+}
+
+static void DigiConsider(const uint8_t *frame, uint16_t len)
+{
+    if (!gAPRS_DIGI || gDigiLen != 0 || len < 23u) return;
+    if (frame[13] & 1u) return;
+
+    uint8_t me[7];
+    AX25_EncodeAddress(gMyCall, gMySsid, false, me);
+    if (memcmp(&frame[7], me, 6) == 0) return;
+
+    uint16_t s = 6;
+    while (s + 7u < len && (frame[s] & 1u) == 0) s += 7u;
+    const uint16_t info = s + 3u;
+    if (info >= len - 2u) return;
+
+    for (uint16_t a = 20; a <= s; a += 7u) {
+        if (frame[a] & 0x80u) { if (frame[a] & 1u) break; continue; }
+        if (((frame[a] >> 1) & 0x0Fu) != 1u) return;
+        static const char WIDE1[6] = { 'W','I','D','E','1',' ' };
+        for (uint8_t k = 0; k < 6; k++)
+            if ((char)(frame[a - 6u + k] >> 1) != WIDE1[k]) return;
+        if (DigiDuplicate(frame, len, info)) return;
+        memcpy(gDigiFrame, frame, len);
+        memcpy(&gDigiFrame[a - 6u], me, 6);
+        gDigiFrame[a] = (uint8_t)(0x80u | 0x60u | ((gMySsid & 0x0Fu) << 1) | (frame[a] & 1u));
+        gDigiLen = len;
+        return;
+    }
+}
+
+// build "SRC>APZUVK,<via1>,<via2>:info" as an AX.25 frame (with a dummy FCS)
+static uint16_t MkFrame(uint8_t *f, const char *src, uint8_t sssid,
+                        const char *v1, uint8_t v1s, bool v1h,
+                        const char *v2, uint8_t v2s, bool v2h, const char *info)
+{
+    uint16_t i = 0;
+    AX25_EncodeAddress("APZUVK", 0, false, &f[i]); i += 7;
+    AX25_EncodeAddress(src, sssid, false, &f[i]);  i += 7;
+    if (v1) { AX25_EncodeAddress(v1, v1s, v2 == NULL, &f[i]); if (v1h) f[i+6] |= 0x80; i += 7; }
+    if (v2) { AX25_EncodeAddress(v2, v2s, true,       &f[i]); if (v2h) f[i+6] |= 0x80; i += 7; }
+    f[i++] = 0x03; f[i++] = 0xF0;
+    const size_t n = strlen(info);
+    memcpy(&f[i], info, n); i += (uint16_t)n;
+    const uint16_t fcs = AX25_CalculateFCS(f, i);
+    f[i++] = fcs & 0xFF; f[i++] = fcs >> 8;
+    return i;
+}
+
+static int test_digi(void)
+{
+    uint8_t f[80];
+    int fail = 0;
+    const char *INFO = "!4059.60N/02735.98E>digi test";
+
+    // (A) WIDE1-1 unused -> substituted with MYCALL*, same length
+    memset(gDigiAge, 0, sizeof(gDigiAge));
+    gDigiLen = 0;
+    uint16_t len = MkFrame(f, "TB1AAW", 0, "WIDE1", 1, false, "WIDE2", 1, false, INFO);
+    DigiConsider(f, len);
+    if (gDigiLen != len) { printf("digi A: not queued (len=%u)\n", gDigiLen); fail = 1; }
+    else {
+        char call[7] = {0};
+        for (int k = 0; k < 6; k++) call[k] = (char)(gDigiFrame[14 + k] >> 1);
+        const uint8_t sb = gDigiFrame[20];
+        if (strncmp(call, "TA1JS ", 6) != 0 || !(sb & 0x80) || ((sb >> 1) & 0x0F) != 7 || (sb & 1)) {
+            printf("digi A: bad substitution call='%.6s' ssidbyte=%02X\n", call, sb); fail = 1;
+        }
+        // the rest of the frame must be untouched, and WIDE2-1 still unused
+        if (memcmp(&gDigiFrame[21], &f[21], len - 21 - 2) != 0) { printf("digi A: tail changed\n"); fail = 1; }
+        if (gDigiFrame[27] & 0x80) { printf("digi A: WIDE2 wrongly marked used\n"); fail = 1; }
+    }
+
+    // (B) same packet again inside the dedupe window -> ignored
+    gDigiLen = 0;
+    DigiConsider(f, len);
+    if (gDigiLen != 0) { printf("digi B: duplicate was repeated\n"); fail = 1; }
+
+    // (C) WIDE1-1 already used by another digi -> not ours
+    memset(gDigiAge, 0, sizeof(gDigiAge)); gDigiLen = 0;
+    len = MkFrame(f, "TB1AAW", 0, "WIDE1", 1, true, "WIDE2", 1, false, INFO);
+    DigiConsider(f, len);
+    if (gDigiLen != 0) { printf("digi C: repeated an already-used hop\n"); fail = 1; }
+
+    // (D) first unused hop is WIDE2-2 -> fill-in role declines
+    memset(gDigiAge, 0, sizeof(gDigiAge)); gDigiLen = 0;
+    len = MkFrame(f, "TB1AAW", 0, "WIDE2", 2, false, NULL, 0, false, INFO);
+    DigiConsider(f, len);
+    if (gDigiLen != 0) { printf("digi D: repeated a WIDE2-2 hop\n"); fail = 1; }
+
+    // (E) our own transmission -> never repeated
+    memset(gDigiAge, 0, sizeof(gDigiAge)); gDigiLen = 0;
+    len = MkFrame(f, "TA1JS", 7, "WIDE1", 1, false, NULL, 0, false, INFO);
+    DigiConsider(f, len);
+    if (gDigiLen != 0) { printf("digi E: repeated our own frame\n"); fail = 1; }
+
+    // (F) no digipeater path at all -> nothing to do
+    memset(gDigiAge, 0, sizeof(gDigiAge)); gDigiLen = 0;
+    len = MkFrame(f, "TB1AAW", 0, NULL, 0, false, NULL, 0, false, INFO);
+    DigiConsider(f, len);
+    if (gDigiLen != 0) { printf("digi F: repeated a pathless frame\n"); fail = 1; }
+
+    // (G) a different packet from the same station still gets through
+    memset(gDigiAge, 0, sizeof(gDigiAge)); gDigiLen = 0;
+    len = MkFrame(f, "TB1AAW", 0, "WIDE1", 1, false, NULL, 0, false, INFO);
+    DigiConsider(f, len);
+    uint16_t first = gDigiLen; gDigiLen = 0;
+    len = MkFrame(f, "TB1AAW", 0, "WIDE1", 1, false, NULL, 0, false, "!4059.60N/02735.98E>moved");
+    DigiConsider(f, len);
+    if (first == 0 || gDigiLen == 0) { printf("digi G: distinct payload was suppressed\n"); fail = 1; }
+
+    printf(fail ? "DIGIPEATER FAILED\n"
+                : "DIGIPEATER PASSED (substitution, dedupe, used-hop, WIDE2, self, pathless, distinct)\n");
+    return fail;
+}
+
 int main(void)
 {
     // Build the frame exactly like APRS_TransmitHardcoded_N0CALL
@@ -486,5 +625,7 @@ int main(void)
     }
     printf(tpfail ? "THIRD-PARTY UNWRAP FAILED\n" : "THIRD-PARTY UNWRAP PASSED (msg to me, SSID match/mismatch, gated posn, direct regression)\n");
 
-    return pfail || tpfail;
+    const int dfail = test_digi();
+
+    return pfail || tpfail || dfail;
 }
