@@ -41,6 +41,10 @@ void APRS_BeaconAt(int32_t lat_udeg, int32_t lon_udeg);
 // Main APRS task (called from app loop)
 void APRS_Task(void);
 void APRS_TxCooldown(void);   // runs even while listening is OFF (TX needs no RX)
+
+// Raw AX.25 TX for a host acting as a KISS TNC. Frame excludes the FCS.
+#define APRS_RAWTX_MAX 150u   // see the bitstream-budget note in aprs_minimal.c
+bool APRS_QueueRawFrame(const uint8_t *frame, uint16_t len);
 #ifdef ENABLE_APRS_DIGI
 extern bool gAPRS_DIGI;       // fill-in digipeater on/off (EEPROM State[14])
 #endif

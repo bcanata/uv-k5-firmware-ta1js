@@ -640,6 +640,20 @@ static void CMD_APRS_SetOn(const uint8_t *pBuffer)
     SendReply(&Reply, sizeof(Reply));
 }
 
+// 0x0708: transmit a raw AX.25 frame supplied by the host (KISS TNC mode).
+// Data = the frame WITHOUT its FCS, which the radio appends. acks 0x0709 with
+// Ok=0 if the frame is malformed, too long for the bitstream buffer, or the
+// radio is busy — the host must be told, not left to assume it went out.
+static void CMD_APRS_TxRaw(const uint8_t *pBuffer, uint16_t size)
+{
+    REPLY_ack_t Reply;
+
+    Reply.Header.ID   = 0x0709;
+    Reply.Header.Size = sizeof(Reply) - sizeof(Header_t);
+    Reply.Ok          = APRS_QueueRawFrame(&pBuffer[sizeof(Header_t)], size) ? 1 : 0;
+    SendReply(&Reply, sizeof(Reply));
+}
+
 static void CMD_APRS_Send(const uint8_t *pBuffer, bool beacon)
 {
     REPLY_ack_t Reply;
@@ -861,6 +875,10 @@ void UART_HandleCommand(void)
 
         case 0x0706:
             CMD_APRS_SetOn(UART_Command.Buffer);
+            break;
+
+        case 0x0708:
+            CMD_APRS_TxRaw(UART_Command.Buffer, UART_Command.Header.Size);
             break;
 #endif
 

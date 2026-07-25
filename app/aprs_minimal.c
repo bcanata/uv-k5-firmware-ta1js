@@ -1389,12 +1389,54 @@ void APRS_Task(void)
     APRS_TxCooldown();
 }
 
+// ---------------------------------------------------------------------------
+// Raw AX.25 transmission, for a host acting as a KISS TNC (UART 0x0708).
+//
+// The caller supplies a complete frame WITHOUT the FCS; APRS_TxFrame appends
+// it in place, so the buffer carries two spare bytes. Queued rather than sent
+// inline because UART commands are handled with interrupts disabled and a
+// transmission takes the better part of a second.
+//
+// The length cap is not arbitrary: HDLC_PutBit silently drops bits once the
+// encoded bitstream fills HDLC_BUF_SIZE (240 B = 1920 bits), and 32 lead flags
+// plus worst-case bit stuffing leave room for roughly 170 bytes. Refusing an
+// over-long frame is much better than transmitting a truncated one.
+// ---------------------------------------------------------------------------
+static uint8_t  gRawTxFrame[APRS_RAWTX_MAX + 2];
+static uint16_t gRawTxLen;
+
+bool APRS_QueueRawFrame(const uint8_t *frame, uint16_t len)
+{
+    if (gRawTxLen != 0 || len < 17u || len > APRS_RAWTX_MAX || !APRS_Configured())
+        return false;
+    memcpy(gRawTxFrame, frame, len);
+    gRawTxLen = len;
+    return true;
+}
+
+// Drained from the main loop whether or not APRS listening is on, because a
+// KISS host transmits through us regardless of whether we are receiving.
+static void APRS_PendingTx(void)
+{
+    if (gRawTxLen == 0 || gAPRSState != APRS_STATE_IDLE ||
+        gCurrentFunction == FUNCTION_TRANSMIT)
+        return;
+    const uint16_t n = gRawTxLen;
+    gRawTxLen = 0;
+    gAPRSState = APRS_STATE_TRANSMITTING;
+    APRS_StopListening();
+    APRS_TxFrame(gRawTxFrame, n);
+    gAPRSState = APRS_STATE_WAITING;
+}
+
 // Cooldown after a transmission: WAITING -> IDLE, one second later.
 // The main loop calls this even while APRS listening is OFF, because TX does
 // not need listening (APRS_SendMessage/APRS_TransmitNow only require a
 // callsign). Before, this lived inside APRS_Task(), which only runs when
 // APRS_ON: the first beacon or message went out, the state stuck at WAITING
 // and every later one was silently dropped until APRS was switched on again.
+// Also drains a queued raw frame, so both branches of the main loop need only
+// this one call and the two share a single prologue.
 void APRS_TxCooldown(void)
 {
     if (gAPRSState == APRS_STATE_WAITING) {
@@ -1406,4 +1448,5 @@ void APRS_TxCooldown(void)
             last_tx = 0;
         }
     }
+    APRS_PendingTx();
 }
