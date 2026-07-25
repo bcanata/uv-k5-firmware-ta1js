@@ -250,15 +250,21 @@ bool APRS_Configured(void)
     return true;
 }
 
+// AX.25 destination for every frame we transmit: this is what identifies the
+// firmware to the APRS network (aprs.fi, aprs.im and friends resolve it to a
+// device name). APZUVK is from the experimental APZ range, pending a registered
+// tocall — see aprsorg/aprs-deviceid#333.
+#define APRS_TOCALL "APZUVK"
+
 static uint16_t APRS_BuildHeader(uint8_t *frame)
 {
-    // APRS,WIDE1-1,WIDE2-1 path, source callsign/SSID from the menu settings.
+    // <tocall>,WIDE1-1,WIDE2-1 path, source callsign/SSID from the menu settings.
     const char *src = gEeprom.APRS_CALLSIGN;
     if (src[0] <= ' ')
         src = "N0CALL";
 
     uint16_t idx = 0;
-    AX25_EncodeAddress("APRS",  0, false, &frame[idx]); idx += 7;
+    AX25_EncodeAddress(APRS_TOCALL, 0, false, &frame[idx]); idx += 7;
     AX25_EncodeAddress(src, gEeprom.APRS_SSID & 0x0F, false, &frame[idx]); idx += 7;
     AX25_EncodeAddress("WIDE1", 1, false, &frame[idx]); idx += 7;
     AX25_EncodeAddress("WIDE2", 1, true,  &frame[idx]); idx += 7;
@@ -1045,8 +1051,8 @@ __attribute__((unused)) static uint16_t APRS_BuildPacket(const char *callsign, u
     // Start with flag
     output[idx++] = 0x7E;
 
-    // Destination address (APRS, SSID 0)
-    APRS_CallsignToAX25("APRS", 0, &output[idx]);
+    // Destination address (tocall, SSID 0)
+    APRS_CallsignToAX25(APRS_TOCALL, 0, &output[idx]);
     idx += 7;
 
     // Source address (user's callsign and SSID)
