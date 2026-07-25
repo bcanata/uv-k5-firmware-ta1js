@@ -764,22 +764,26 @@ static void CMD_0B05_SetModulation(const uint8_t *pBuffer)
     RC_Ack(0x0B05, 1);
 }
 
-// 0x0A03 (WITHDRAWN): push one raw display frame - marker 0xAB 0xED then the
-// live 1024-byte paged framebuffer (gStatusLine = page 0, gFrameBuffer = pages
-// 1..7).  Kept commented out on purpose: UART_Send() busy-waits per byte, and
-// the command handler runs under __disable_irq(), so one frame blocks all
-// interrupts for ~270 ms at 38400 baud.  Polling it shreds the APRS FSK RX
-// capture (missed FIFO-almost-full / RX-finished interrupts).  Do not re-enable
-// without moving the push out of the IRQ-disabled path.
-#if 0
+// 0x0A03: push one raw display frame - marker 0xAB 0xED then the live
+// 1024-byte paged framebuffer (gStatusLine = page 0, gFrameBuffer = pages 1..7).
+//
+// UART_Send() busy-waits per byte and UART_HandleCommand() runs under
+// __disable_irq(), so one frame holds every interrupt off for ~270 ms at
+// 38400 baud.  The radio survives that, but an APRS packet being captured does
+// not: the FSK FIFO interrupts are missed and the frame is lost.  So the mirror
+// pauses whenever APRS listening is on - it answers nothing and the host shows
+// a note.  Turn APRS off in the menu to use the live screen.
 static void CMD_0A03_Screen(void)
 {
+#ifdef ENABLE_APRS
+    if (gEeprom.APRS_ON)
+        return;
+#endif
     static const uint8_t marker[2] = { 0xAB, 0xED };
     UART_Send(marker, sizeof(marker));
     UART_Send(gStatusLine, LCD_WIDTH);                 // 128 bytes
     UART_Send(gFrameBuffer, FRAME_LINES * LCD_WIDTH);  // 896 bytes
 }
-#endif
 #endif  // ENABLE_UART_RC
 
 void UART_HandleCommand(void)
@@ -839,10 +843,9 @@ void UART_HandleCommand(void)
 #endif
 
 #ifdef ENABLE_UART_RC
-        // 0x0A03 display mirror withdrawn - see CMD_0A03_Screen above.
-        // case 0x0A03:
-        //     CMD_0A03_Screen();
-        //     break;
+        case 0x0A03:
+            CMD_0A03_Screen();
+            break;
 
         case 0x0B01:
             CMD_0B01_InjectKey(UART_Command.Buffer);
