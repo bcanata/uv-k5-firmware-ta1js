@@ -21,6 +21,33 @@ Verified on-air between two UV-K5s and against the live 144.800 MHz network.
   callsign pops a box over any screen, dismissed by any key.
 - **PC / phone control** over USB (see *Companion tools*).
 
+## Compatibility: which receivers decode our transmissions
+
+Read this before expecting a Kenwood or Yaesu with a built-in TNC to copy you.
+
+The radio's BK4819 chip generates the packet tones in its own FSK modem, and that
+modem offers only two FFSK tone pairs — 1200/1800 Hz or 1200/2400 Hz. Bell 202,
+which APRS uses, needs 1200/**2200** Hz. This firmware transmits **1200/1800**:
+measured on air with an SDR capture (mark ≈ 1200 Hz, space ≈ 1800 Hz, equal
+deviation). The 1200/2400 mode was tried and is unusable — no 2400 Hz tone
+appears at all.
+
+That 400 Hz space-tone error is tolerated by software/DSP demodulators, but not
+by hardware TNCs:
+
+| Decodes us | Does not decode us |
+|---|---|
+| This firmware's own RX (UV-K5 ↔ UV-K5) | Radios with a built-in hardware TNC: Kenwood TH-D7x / D74 / **D75**, Yaesu sets with an internal TNC |
+| Dire Wolf, APRSDroid, soundcard/DSP TNCs | |
+| Software digipeaters and igates — so beacons **do** reach aprs.fi | |
+
+**Receiving is unaffected**: the radio decodes standard Bell 202 traffic from
+everybody, including those radios.
+
+Fixing this means generating the two tones in software (switching every 833 µs)
+instead of using the chip's modem. Tracked in
+[issue #1](https://github.com/bcanata/uv-k5-firmware-ta1js/issues/1).
+
 ## Building
 
 APRS is on by default in this edition:
