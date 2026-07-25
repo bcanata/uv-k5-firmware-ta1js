@@ -159,7 +159,12 @@ static void APRS_TransmitBell202(const uint8_t *frame, uint16_t frame_len)
 
     BK4819_WriteRegister(BK4819_REG_51, 0);                            // CTCSS/CDCSS off
     BK4819_WriteRegister(BK4819_REG_40, (dev_val & 0xF000u) | 1200u);  // tone deviation ~3 kHz
-    BK4819_WriteRegister(BK4819_REG_2B, (1u << 2) | (1u << 0));        // TX HPF + pre-emphasis off
+    // REG_2B<2> TX HPF300 off, <0> TX pre-emphasis off (Registers_V1.1 p.8-9;
+    // 1 = disable). Measured 2026-07-25 with an RTL-SDR + direwolf: the AF TX
+    // filter chain has no effect at all on the FFSK tone balance - neither
+    // disabling TX LPF1 (<1>) nor re-enabling pre-emphasis moved the measured
+    // mark/space ratio off 3/2. Do not chase the imbalance here.
+    BK4819_WriteRegister(BK4819_REG_2B, (1u << 2) | (1u << 0));
 
     // REG_70: <15> tone1 enable, <14:8> tone1 gain, <7> tone2 enable, <6:0>
     // tone2 gain. Tone1's gain field stays 0 on purpose: REG_71 only uses
@@ -172,8 +177,14 @@ static void APRS_TransmitBell202(const uint8_t *frame, uint16_t frame_len)
     BK4819_WriteRegister(BK4819_REG_71, 22714);  // tone1: 2200 Hz (space)
     BK4819_WriteRegister(BK4819_REG_72, 12389);  // tone2: 1200 Hz (mark / bit clock)
 
+    // FSK TX mode 001 = FFSK 1200/1800. Measured on air 2026-07-25 (RTL-SDR
+    // capture, zero-crossing analysis): the tones really are 1200/1800 Hz, NOT
+    // the 1200/2200 Bell 202 pair - REG_71 below has no effect on them. Mode
+    // 011 (FFSK 1200/2400) was tried and is unusable: no 2400 Hz tone appears,
+    // the output collapses to a near-constant 1200 Hz tone and nothing decodes
+    // (neither direwolf nor a second UV-K5). 1200/1800 it is.
     BK4819_WriteRegister(BK4819_REG_58,
-        (1u << 13) |   // FSK TX mode: FFSK 1200/1800, tones overridden above
+        (1u << 13) |   // FSK TX mode: FFSK 1200/1800
         (7u << 10) |   // FSK RX mode (unused while transmitting)
         (3u <<  8) |   // FSK RX gain
         (3u <<  6) |   // FSK enable (TRM REG_58<7:6> = 11; all Beken examples set this)
