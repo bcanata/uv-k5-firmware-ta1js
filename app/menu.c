@@ -2029,26 +2029,22 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
             return;
         }
         else
-        {   // editing APRS string fields
-            int dot_pos;
-            const int max_len = APRS_EditMaxLen(UI_MENU_GetCurrentMenuId(), &dot_pos);
-
-            if (edit_index >= 0 && edit_index < max_len)
-            {
-
-                if (++edit_index == dot_pos)
-                    edit_index++;
-
-                if (edit_index < max_len)
-                    return; // next char
-
-                // exit edit mode
-                gFlagAcceptSetting  = true;
-                gAskForConfirmation = 0;
-                gIsInSubMenu       = false;
-                edit_index         = -1;
-                return;
+        {   // editing APRS string fields: MENU saves whatever has been typed.
+            // It used to step the cursor one character per press and only save
+            // once the cursor reached the end of the field, so committing a
+            // two-character message meant ~29 further MENU presses and looked
+            // like a hang (reported in ta1js#1). EXIT still backspaces.
+            if (aprs_pair_first != 0xFF && edit_index >= 0)
+            {   // drop a half-typed digit pair instead of storing the digit
+                const int len = APRS_EditMaxLen(UI_MENU_GetCurrentMenuId(), NULL);
+                edit[edit_index] = (len == 9) ? '_' : ' ';
+                aprs_pair_first  = 0xFF;
             }
+            gFlagAcceptSetting  = true;
+            gAskForConfirmation = 0;
+            gIsInSubMenu        = false;
+            edit_index          = -1;
+            return;
         }
     }
 #endif

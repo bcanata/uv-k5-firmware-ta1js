@@ -59,7 +59,9 @@ Flags:
 
 **Text entry** (Call/Cmnt/MsgTo/Msg): two digits per character —
 `00`–`09` digits, `10`–`35` = A–Z, `36` space, `37`–`45` punctuation
-(`-./?!@:,'`). The web tool encodes text for you. **EXIT** backspaces.
+(`-./?!@:,'`). The web tool encodes text for you. **MENU** saves the field as
+soon as you press it, however few characters you typed; **EXIT** backspaces
+(and leaves the field unchanged at position 0).
 
 Callsign/SSID/location/message-target persist in EEPROM; comment and message
 text reset to defaults on power-up.
