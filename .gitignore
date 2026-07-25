@@ -17,4 +17,11 @@ K5TOOL.log*
 eeprom-*.raw
 f4hwn
 f4hwn.*
-!archive/f4hwn*CLAUDE.md
+!archive/f4hwn*
+
+# local-only working files: CLAUDE.md carries the operator's own callsign and
+# coordinates in its examples, and the rest are build output or caches
+/CLAUDE.md
+/dist/
+/f4hwn_verified.bin
+__pycache__/
