@@ -42,7 +42,7 @@ Flags:
 
 ## Menu items
 
-`APRS` group (menu numbers shift with other features):
+The APRS group is the **first ten items** of the menu, so it is reachable without scrolling:
 
 | Item | Meaning |
 |------|---------|
@@ -54,8 +54,8 @@ Flags:
 | Cmnt | Beacon comment |
 | MsgTo| Message destination, **callsign *and* SSID** (e.g. `VA3EMQ-7`) |
 | Msg  | Message text |
-| Send | Transmit the message to MsgTo |
-| TX   | Transmit one position beacon now |
+| Send | Sends the message to MsgTo **the moment you press MENU** (the value area shows `SEND MESSAGE`) |
+| BEACON | Transmits one position beacon **the moment you press MENU** (shows `SEND BEACON`) |
 
 **Text entry** (Call/Cmnt/MsgTo/Msg): two digits per character —
 `00`–`09` digits, `10`–`35` = A–Z, `36` space, `37`–`45` punctuation

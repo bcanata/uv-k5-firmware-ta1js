@@ -45,6 +45,19 @@
 
 const t_menu_item MenuList[] =
 {
+#ifdef ENABLE_APRS
+    // APRS menu items
+    {"APRS",    MENU_APRS_ON        },
+    {"Intv",    MENU_APRS_INTV      },
+    {"Call",    MENU_APRS_CALL      },
+    {"SSID",    MENU_APRS_SSID      },
+    {"Loc",     MENU_APRS_LOC       },
+    {"Cmnt",    MENU_APRS_CMNT      },
+    {"MsgTo",   MENU_APRS_MSGTO     },
+    {"Msg",     MENU_APRS_MSGTXT    },
+    {"Send",    MENU_APRS_MSGSND    },
+    {"BEACON",  MENU_APRS_TX        },
+#endif
 //   text,          menu ID
     {"Step",        MENU_STEP          },
     {"Power",       MENU_TXP           }, // was "TXP"
@@ -166,19 +179,6 @@ const t_menu_item MenuList[] =
 #ifdef ENABLE_NOAA
     {"SetNWR",      MENU_NOAA_S    },
 #endif
-#endif
-#ifdef ENABLE_APRS
-    // APRS menu items
-    {"APRS",    MENU_APRS_ON        },
-    {"Intv",    MENU_APRS_INTV      },
-    {"Call",    MENU_APRS_CALL      },
-    {"SSID",    MENU_APRS_SSID      },
-    {"Loc",     MENU_APRS_LOC       },
-    {"Cmnt",    MENU_APRS_CMNT      },
-    {"MsgTo",   MENU_APRS_MSGTO     },
-    {"Msg",     MENU_APRS_MSGTXT    },
-    {"Send",    MENU_APRS_MSGSND    },
-    {"TX",      MENU_APRS_TX        },
 #endif
     // hidden menu items from here on
     // enabled if pressing both the PTT and upper side button at power-on
@@ -1190,9 +1190,13 @@ void UI_DisplayMenu(void)
 
 #ifdef ENABLE_APRS
         case MENU_APRS_ON:
-        case MENU_APRS_TX:
-        case MENU_APRS_MSGSND:
             strcpy(String, gSubMenu_OFF_ON[gSubMenuSelection]);
+            break;
+        case MENU_APRS_TX:      // one-shot actions: MENU fires them, no OFF/ON
+            strcpy(String, "SEND\nBEACON");
+            break;
+        case MENU_APRS_MSGSND:
+            strcpy(String, "SEND\nMESSAGE");
             break;
         case MENU_APRS_MSGTO:
             if (gIsInSubMenu && edit_index >= 0)

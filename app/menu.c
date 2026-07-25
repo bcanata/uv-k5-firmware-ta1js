@@ -1930,6 +1930,21 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
                     return;  // invalid channel
         #endif
 
+#ifdef ENABLE_APRS
+        // BEACON and Send are one-shot actions, not settings: fire them on this
+        // MENU press instead of opening a submenu and demanding an OFF->ON step
+        // (the menu shows "SEND BEACON" / "SEND MESSAGE" as the value, so what
+        // the key does is visible before it is pressed).
+        if (UI_MENU_GetCurrentMenuId() == MENU_APRS_TX) {
+            APRS_TransmitNow();
+            return;
+        }
+        if (UI_MENU_GetCurrentMenuId() == MENU_APRS_MSGSND) {
+            APRS_SendMessage();
+            return;
+        }
+#endif
+
         gAskForConfirmation = 0;
         gIsInSubMenu        = true;
 
