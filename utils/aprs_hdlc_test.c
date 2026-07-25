@@ -233,7 +233,7 @@ int main(void)
     static const uint8_t INFO[] = "!1000.00N/02000.00E>UV-K5 APRS";
     uint8_t frame[7 * 4 + 2 + (sizeof(INFO) - 1) + 2];
     uint16_t idx = 0;
-    AX25_EncodeAddress("APRS",  0, false, &frame[idx]); idx += 7;
+    AX25_EncodeAddress("APZUVK", 0, false, &frame[idx]); idx += 7;  // mirrors APRS_TOCALL
     AX25_EncodeAddress("N0CALL", 0, false, &frame[idx]); idx += 7;
     AX25_EncodeAddress("WIDE1", 1, false, &frame[idx]); idx += 7;
     AX25_EncodeAddress("WIDE2", 1, true,  &frame[idx]); idx += 7;
@@ -330,7 +330,7 @@ int main(void)
     printf("info=\"%.*s\"\n", best_len - 2 - 30, &rxframe[30]);
 
     bool ok = (want == got) && rxframe[28] == 0x03 && rxframe[29] == 0xF0 &&
-              !memcmp(dst, "APRS  ", 6) && !memcmp(src, "N0CALL", 6) &&
+              !memcmp(dst, "APZUVK", 6) && !memcmp(src, "N0CALL", 6) &&
               !memcmp(via, "WIDE1 ", 6) && !memcmp(via2, "WIDE2 ", 6) &&
               (rxframe[20] & 1) == 0 && (rxframe[27] & 1) == 1;
     printf(ok ? "ALL CHECKS PASSED\n" : "CHECKS FAILED\n");
