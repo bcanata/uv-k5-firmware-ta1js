@@ -1,24 +1,117 @@
-name: Build Firmware
+name: Build firmware
+
+# Builds both band variants and publishes them as release assets, so
+# uvk5.canata.dev can fetch the newest firmware straight from GitHub:
+#
+#   ta1js-aprs-amateur.bin   ENABLE_AMATEUR_BAND_ONLY=1  (VFO/TX limited to amateur allocations)
+#   ta1js-aprs-allband.bin   ENABLE_AMATEUR_BAND_ONLY=0  (no band restriction)
+#
+# A push to a release branch refreshes the rolling "latest" release; pushing a
+# v* tag publishes a permanent versioned release as well.
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, aprs-bell202-tx ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-    - name: Compile firmware
-      run: |
-        chmod +x compile-with-docker.sh
-        ./compile-with-docker.sh
+      # The flash budget is a few hundred bytes, so the compiler version is not
+      # cosmetic: pin the toolchain the project is developed against (see
+      # CLAUDE.md) instead of whatever the runner or Alpine happens to ship.
+      - name: Install arm-none-eabi-gcc 10.3
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '10.3-2021.10'
 
-    - name: Upload firmware artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: firmware-artifact
-        path: compiled-firmware/f4hwn.packed.bin
+      - name: Build both band variants
+        run: |
+          set -eu
+          mkdir -p out
+          make clean
+          make -j"$(nproc)" ENABLE_AMATEUR_BAND_ONLY=1
+          cp f4hwn.bin out/ta1js-aprs-amateur.bin
+          make clean
+          make -j"$(nproc)" ENABLE_AMATEUR_BAND_ONLY=0
+          cp f4hwn.bin out/ta1js-aprs-allband.bin
+
+      # 61440 bytes is the whole program area. Overflowing it yields a radio
+      # that will not boot, so fail here rather than shipping it.
+      - name: Check the 60 KB flash limit
+        run: |
+          set -eu
+          fail=0
+          for f in out/*.bin; do
+            size=$(stat -c%s "$f")
+            free=$((61440 - size))
+            echo "$(basename "$f"): $size bytes, $free free"
+            if [ "$size" -gt 61440 ]; then
+              echo "::error file=$f::$size bytes exceeds the 61440 byte program area"
+              fail=1
+            elif [ "$free" -lt 128 ]; then
+              echo "::warning file=$f::only $free bytes of headroom left"
+            fi
+          done
+          [ "$fail" -eq 0 ]
+
+      - name: Self-test the APRS encoder, decoder and parsers
+        run: |
+          cc -Wall -o /tmp/hdlc_test utils/aprs_hdlc_test.c
+          /tmp/hdlc_test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: out/*.bin
+
+      - name: Compose release notes
+        if: github.event_name == 'push'
+        run: |
+          set -eu
+          {
+            echo "Built from \`${GITHUB_REF_NAME}\` at \`${GITHUB_SHA:0:7}\` by CI."
+            echo
+            echo "| Asset | Bands | Size |"
+            echo "|---|---|---|"
+            echo "| \`ta1js-aprs-amateur.bin\` | amateur allocations only | $(stat -c%s out/ta1js-aprs-amateur.bin) bytes |"
+            echo "| \`ta1js-aprs-allband.bin\` | no band restriction | $(stat -c%s out/ta1js-aprs-allband.bin) bytes |"
+            echo
+            echo "Flash the **raw** \`.bin\` from the Install tab at <https://uvk5.canata.dev>, or with"
+            echo "\`python utils/k5flash.py <port> <file>.bin '*TA1JS v1.2'\` and the radio in flash"
+            echo "mode (hold PTT while powering on)."
+            echo
+            echo "Transmitting requires your own callsign: a fresh radio is \`N0CALL\` and refuses"
+            echo "to key up. An all-band build can transmit outside the amateur allocations —"
+            echo "that is the operator's responsibility."
+          } > notes.md
+
+      - name: Refresh the rolling "latest" release
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest out/*.bin \
+            --title "Latest build (${GITHUB_REF_NAME})" \
+            --notes-file notes.md \
+            --latest
+
+      - name: Publish the tagged release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "${GITHUB_REF_NAME}" out/*.bin \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file notes.md
