@@ -1014,6 +1014,7 @@ void MENU_AcceptSetting(void)
                         gAPRS_MsgTo[o++] = c;
                 }
                 gAPRS_MsgTo[o] = 0;
+                gAPRS_MsgDirty = true;   // new target -> new {nn on the next Send
             }
             break;
         case MENU_APRS_MSGTXT:
@@ -1024,6 +1025,7 @@ void MENU_AcceptSetting(void)
                 while (len > 0 && gAPRS_MsgText[len - 1] == ' ')
                     len--;
                 gAPRS_MsgText[len] = 0;
+                gAPRS_MsgDirty = true;   // new text -> new {nn on the next Send
             }
             break;
         case MENU_APRS_MSGSND:

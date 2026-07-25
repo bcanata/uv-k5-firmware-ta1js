@@ -631,6 +631,7 @@ static void CMD_APRS_Send(const uint8_t *pBuffer, bool beacon)
         const CMD_0700_t *pCmd = (const CMD_0700_t *)pBuffer;
         memcpy(gAPRS_MsgTo,   pCmd->Dest, 9);  gAPRS_MsgTo[9]   = 0;
         memcpy(gAPRS_MsgText, pCmd->Text, 30); gAPRS_MsgText[30] = 0;
+        gAPRS_MsgDirty = true;   // a PC-sent message is always a new one
         APRS_SendMessage();
     } else {
         APRS_TransmitNow();

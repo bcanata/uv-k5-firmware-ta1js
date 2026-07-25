@@ -59,6 +59,7 @@ bool APRS_DismissMessage(void);
 // "41.15N 27.84E" for the Loc menu display
 void APRS_FormatLatLon(char *out);
 extern char gAPRS_MsgTo[10];
+extern bool gAPRS_MsgDirty;
 extern char gAPRS_MsgText[31];
 
 // Last decoded packet, shown on the main screen while non-empty

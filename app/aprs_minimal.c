@@ -33,6 +33,7 @@
 // External references
 extern volatile uint32_t gGlobalSysTickCounter;
 extern void SETTINGS_SaveAPRS(void);
+extern bool gIsInSubMenu;   // ui/menu.h - true while a menu field is open
 
 // CRC-16 for AX.25 - minimal calculation (no lookup table to save space)
 static uint16_t APRS_CalculateCRC(const uint8_t *data, uint16_t length)
@@ -231,6 +232,7 @@ char gAPRS_MsgText[31];
 #define APRS_MSG_MAX     34u   // 30 chars of text + "{nn" / "ack" + line number
 #define APRS_ACK_SEQ_MAX  5u   // spec allows up to 5 characters
 static uint8_t gAPRS_MsgSeq;
+bool gAPRS_MsgDirty;        // set when MsgTo/Msg changes; gates the {nn bump
 static char    gAPRS_AckTo[10];
 static char    gAPRS_AckSeq[APRS_ACK_SEQ_MAX + 1];
 static bool    gAPRS_AckPending;
@@ -757,7 +759,10 @@ static void APRS_ShowFrame(const uint8_t *frame, uint16_t len)
         const bool isack = (ilen >= 14 &&
                             ((ip[11] == 'a' && ip[12] == 'c' && ip[13] == 'k') ||
                              (ip[11] == 'r' && ip[12] == 'e' && ip[13] == 'j')));
-        if (!isack) {
+        // Skip the auto target while a menu field is open: entering MsgTo
+        // snapshots the value and MENU writes that snapshot back, so anything
+        // written here would be silently discarded (app/menu.c:2025 -> :1004).
+        if (!isack && !gIsInSubMenu) {
             // Reply target: the sender's full callsign-SSID, so the operator
             // only has to type the text (getting the SSID wrong here is the
             // usual reason the other station silently ignores the message).
@@ -766,6 +771,7 @@ static void APRS_ShowFrame(const uint8_t *frame, uint16_t len)
                 gAPRS_AckTo[k] = gAPRS_RxDisplay[k];
             gAPRS_AckTo[k] = 0;
             memcpy(gAPRS_MsgTo, gAPRS_AckTo, (uint8_t)(k + 1));
+            gAPRS_MsgDirty = true;   // a new target means a new line number
         }
 
         // pop the overlay box; auto-times out, or any key dismisses it early
@@ -1179,8 +1185,14 @@ void APRS_SendMessage(void)
     uint8_t k = 0;
     for (; k < 30 && gAPRS_MsgText[k]; k++)
         text[k] = gAPRS_MsgText[k];
-    if (++gAPRS_MsgSeq > 99)
-        gAPRS_MsgSeq = 1;
+    // Only take a new line number when the message actually changed. Sending
+    // the same text again is an APRS *retry*: reusing {nn lets the far end
+    // recognise the duplicate instead of showing it as a new message.
+    if (gAPRS_MsgDirty || gAPRS_MsgSeq == 0) {
+        gAPRS_MsgDirty = false;
+        if (++gAPRS_MsgSeq > 99)
+            gAPRS_MsgSeq = 1;
+    }
     text[k++] = '{';
     text[k++] = (char)('0' + gAPRS_MsgSeq / 10);
     text[k++] = (char)('0' + gAPRS_MsgSeq % 10);
