@@ -1625,6 +1625,8 @@ void APP_TimeSlice500ms(void)
         APRS_Task();
     } else {
         APRS_StopListening();
+        APRS_TxCooldown();   // TX works with listening off; without this the
+                             // state sticks at WAITING after the first frame
     }
 #endif
 

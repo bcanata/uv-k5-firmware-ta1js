@@ -1271,9 +1271,18 @@ void APRS_Task(void)
             BK4819_WriteRegister(BK4819_REG_3F, mask | APRS_RX_IRQ_MASK);
     }
 
-    // Handle waiting state (cooldown after transmission)
+    APRS_TxCooldown();
+}
+
+// Cooldown after a transmission: WAITING -> IDLE, one second later.
+// The main loop calls this even while APRS listening is OFF, because TX does
+// not need listening (APRS_SendMessage/APRS_TransmitNow only require a
+// callsign). Before, this lived inside APRS_Task(), which only runs when
+// APRS_ON: the first beacon or message went out, the state stuck at WAITING
+// and every later one was silently dropped until APRS was switched on again.
+void APRS_TxCooldown(void)
+{
     if (gAPRSState == APRS_STATE_WAITING) {
-        // Wait a bit before allowing next transmission (1 second)
         static uint32_t last_tx = 0;
         if (last_tx == 0) {
             last_tx = gGlobalSysTickCounter;

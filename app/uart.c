@@ -623,6 +623,23 @@ static void CMD_APRS_BeaconAt(const uint8_t *pBuffer)
     SendReply(&Reply, sizeof(Reply));
 }
 
+// 0x0706: switch APRS listening on/off.  Data = { uint8_t On }.  acks 0x0707.
+// Only the flag is touched: the main loop calls APRS_Task()/APRS_StopListening()
+// from it every pass, so arming, disarming and the power-save guard follow.
+static void CMD_APRS_SetOn(const uint8_t *pBuffer)
+{
+    REPLY_ack_t Reply;
+
+    gEeprom.APRS_ON = pBuffer[sizeof(Header_t)] ? true : false;
+    APRS_ResetBeaconTimer();
+    SETTINGS_SaveAPRS();
+
+    Reply.Header.ID   = 0x0707;
+    Reply.Header.Size = sizeof(Reply) - sizeof(Header_t);
+    Reply.Ok          = 1;
+    SendReply(&Reply, sizeof(Reply));
+}
+
 static void CMD_APRS_Send(const uint8_t *pBuffer, bool beacon)
 {
     REPLY_ack_t Reply;
@@ -840,6 +857,10 @@ void UART_HandleCommand(void)
 
         case 0x0704:
             CMD_APRS_BeaconAt(UART_Command.Buffer);
+            break;
+
+        case 0x0706:
+            CMD_APRS_SetOn(UART_Command.Buffer);
             break;
 #endif
 

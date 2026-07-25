@@ -40,6 +40,7 @@ void APRS_BeaconAt(int32_t lat_udeg, int32_t lon_udeg);
 
 // Main APRS task (called from app loop)
 void APRS_Task(void);
+void APRS_TxCooldown(void);   // runs even while listening is OFF (TX needs no RX)
 
 // Check if APRS is currently transmitting
 bool APRS_IsTransmitting(void);
