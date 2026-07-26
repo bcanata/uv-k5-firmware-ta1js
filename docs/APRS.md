@@ -108,6 +108,20 @@ text reset to defaults on power-up.
   number, so the receiving station acknowledges them. The ack arrives as
   `THEIRCALL-n>ackNN` in the message box — that is the delivery confirmation.
   Incoming numbered messages are acked automatically within ~0.5 s.
+- **Nothing is kept in the radio.** A received message is shown for 30 seconds
+  (or until you press a key) and then it is gone: the text lives in a single
+  RAM buffer that the next packet overwrites. There is no inbox, no history,
+  and nothing survives a power cycle — EEPROM holds only your settings
+  (callsign, SSID, position, interval, reply target), not traffic. Even the
+  message *you* typed into `Msg` is cleared at boot.
+
+  This is a space decision, not an oversight: the APRS settings occupy two
+  16-byte EEPROM rows with four spare bytes between them, and the amateur-band
+  image has a few dozen bytes of flash left. A useful inbox needs both.
+
+  If you want a log, keep it on the computer or phone instead — both companion
+  tools below record every decoded packet and every message, and they persist
+  between visits.
 
 ## Companion tools (open source, in `utils/`)
 
