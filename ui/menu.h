@@ -162,6 +162,9 @@ enum
 #ifdef ENABLE_APRS
     ,
     MENU_APRS_ON,
+#ifdef ENABLE_APRS_ACOUSTIC
+    MENU_APRS_ACIN,
+#endif
 #ifdef ENABLE_APRS_DIGI
     MENU_APRS_DIGI,
 #endif

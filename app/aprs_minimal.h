@@ -45,6 +45,11 @@ void APRS_TxCooldown(void);   // runs even while listening is OFF (TX needs no R
 // Raw AX.25 TX for a host acting as a KISS TNC. Frame excludes the FCS.
 #define APRS_RAWTX_MAX 150u   // see the bitstream-budget note in aprs_minimal.c
 bool APRS_QueueRawFrame(const uint8_t *frame, uint16_t len);
+
+#ifdef ENABLE_APRS_ACOUSTIC
+// Blocking: listens on the microphone for a Manchester/OOK position frame.
+bool APRS_AcousticReceive(int32_t *lat_out, int32_t *lon_out);
+#endif
 #ifdef ENABLE_APRS_DIGI
 extern bool gAPRS_DIGI;       // fill-in digipeater on/off (EEPROM State[14])
 #endif

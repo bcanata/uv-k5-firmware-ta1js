@@ -26,6 +26,9 @@
 #include "../settings.h"
 #include "../driver/bk4819.h"
 #include "../driver/system.h"
+#ifdef ENABLE_APRS_ACOUSTIC
+#include "../driver/systick.h"
+#endif
 #ifdef ENABLE_UART
     #include "../driver/uart.h"
 #endif
@@ -1428,6 +1431,145 @@ static void APRS_PendingTx(void)
     APRS_TxFrame(gRawTxFrame, n);
     gAPRSState = APRS_STATE_WAITING;
 }
+
+#ifdef ENABLE_APRS_ACOUSTIC
+// ---------------------------------------------------------------------------
+// Acoustic input: take a position from a phone held against the microphone.
+//
+// There is no other way in without a cable — no BT, no WiFi, no NFC, and a
+// phone cannot transmit on 2 m. The chip's tone decoders are fed by the RX DSP
+// and never hear the mic, but REG_64 (the VOX amplitude) does, so the link is
+// on-off keying: an envelope cannot carry frequency, only presence.
+//
+// Measured on 2026-07-26: quiet ~24, tone ~24000, and with REG_79<15:11> wound
+// from 8 down to 1 the envelope resolves 20 ms bursts instead of 60 ms.
+//
+// Deliberately modal and blocking. RX powers the mic ADC down and the main loop
+// reprograms the chip every pass, so a background decoder would be fighting the
+// radio; blocking also gives us our own timing instead of a 10 ms slice.
+//
+// Wire format, Manchester coded (1 = high-low, 0 = low-high — self-clocking and
+// immune to the threshold drifting as the phone moves):
+//
+//     preamble  16 bits of 1  (trains the threshold, gives us an edge to lock)
+//     sync      0xA5
+//     payload   int32 lat, int32 lon, little endian micro-degrees
+//     crc       CRC-16 over the 8 payload bytes
+//
+// The CRC is not optional: this is an open channel that will hear speech, keys
+// and traffic, and a corrupted frame silently accepted as a position is far
+// worse than one that fails and is retried.
+// ---------------------------------------------------------------------------
+#define AC_SYM_US     25000u   // one Manchester symbol; two per bit
+#define AC_SUB_US      2500u   // sampling step: 10 samples per symbol
+#define AC_GIVEUP_MS  15000u
+
+static uint16_t AC_Env(void)
+{
+    return BK4819_GetVoiceAmplitudeOut();
+}
+
+// Average the envelope across one symbol, so a single noisy reading cannot
+// flip a bit on its own.
+static uint16_t AC_SymbolLevel(void)
+{
+    uint32_t sum = 0;
+    for (uint8_t i = 0; i < 10; i++) {
+        sum += AC_Env();
+        SYSTICK_DelayUs(AC_SUB_US);
+    }
+    return (uint16_t)(sum / 10u);
+}
+
+bool APRS_AcousticReceive(int32_t *lat_out, int32_t *lon_out)
+{
+    const uint16_t r30 = BK4819_ReadRegister(BK4819_REG_30);
+    const uint16_t r79 = BK4819_ReadRegister(0x79);
+    // mic ADC on (only that: TX DSP would fight the receive path), and the
+    // amplitude window narrowed so short bursts survive
+    BK4819_WriteRegister(BK4819_REG_30, (uint16_t)(r30 | (1u << 2)));
+    BK4819_WriteRegister(0x79, (uint16_t)((r79 & 0x07FFu) | (1u << 11)));
+
+    bool ok = false;
+    uint16_t floor_lvl = 0xFFFF, ceil_lvl = 0;
+    uint32_t waited = 0;
+
+    // Learn the room: the quiet floor, then the first tone that clearly beats
+    // it. An absolute threshold cannot work when the phone's distance and the
+    // room's noise are both unknown.
+    for (uint8_t i = 0; i < 40; i++) {
+        const uint16_t v = AC_Env();
+        if (v < floor_lvl) floor_lvl = v;
+        SYSTICK_DelayUs(AC_SUB_US);
+    }
+    const uint16_t arm = (uint16_t)(floor_lvl + 200u);
+
+    while (waited < AC_GIVEUP_MS * 1000u) {
+        if (AC_Env() > arm) break;
+        SYSTICK_DelayUs(AC_SUB_US);
+        waited += AC_SUB_US;
+    }
+    if (waited >= AC_GIVEUP_MS * 1000u)
+        goto done;                       // nothing ever arrived
+
+    // Ride the preamble to learn how loud "on" actually is, then put the
+    // decision threshold halfway between that and the floor.
+    for (uint8_t i = 0; i < 16; i++) {
+        const uint16_t v = AC_SymbolLevel();
+        if (v > ceil_lvl) ceil_lvl = v;
+    }
+    if (ceil_lvl < floor_lvl + 400u)
+        goto done;                       // too quiet to call bits reliably
+    const uint16_t thresh = (uint16_t)((floor_lvl + ceil_lvl) / 2u);
+
+    // Hunt for the sync byte, then read the payload. Manchester means each bit
+    // is two symbols and the pair always differs; a matching pair is a framing
+    // error, which is exactly how noise announces itself.
+    uint8_t  buf[10];
+    uint8_t  sync = 0;
+    uint16_t guard = 0;
+    do {
+        const bool a = AC_SymbolLevel() > thresh;
+        const bool b = AC_SymbolLevel() > thresh;
+        if (a == b)
+            goto done;                   // not Manchester any more: give up
+        sync = (uint8_t)((sync << 1) | (a ? 1u : 0u));
+    } while (sync != 0xA5u && ++guard < 200u);
+    if (sync != 0xA5u)
+        goto done;
+
+    for (uint8_t i = 0; i < sizeof(buf); i++) {
+        uint8_t byte = 0;
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            const bool a = AC_SymbolLevel() > thresh;
+            const bool b = AC_SymbolLevel() > thresh;
+            if (a == b)
+                goto done;
+            byte = (uint8_t)((byte << 1) | (a ? 1u : 0u));
+        }
+        buf[i] = byte;
+    }
+
+    {
+        const uint16_t want = (uint16_t)(buf[8] | (buf[9] << 8));
+        if (APRS_CalculateCRC(buf, 8) != want)
+            goto done;                   // refuse outright, never half-apply
+        int32_t la, lo;
+        memcpy(&la, &buf[0], sizeof(la));
+        memcpy(&lo, &buf[4], sizeof(lo));
+        if (la < -90000000 || la > 90000000 || lo < -180000000 || lo > 180000000)
+            goto done;
+        *lat_out = la;
+        *lon_out = lo;
+        ok = true;
+    }
+
+done:
+    BK4819_WriteRegister(0x79, r79);
+    BK4819_WriteRegister(BK4819_REG_30, r30);
+    return ok;
+}
+#endif  // ENABLE_APRS_ACOUSTIC
 
 // Cooldown after a transmission: WAITING -> IDLE, one second later.
 // The main loop calls this even while APRS listening is OFF, because TX does

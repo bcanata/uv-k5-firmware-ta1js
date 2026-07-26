@@ -72,6 +72,10 @@
     #include "sram-overlay.h"
 #endif
 #include "ui/battery.h"
+#ifdef ENABLE_MIC_PROBE
+#include "ui/helper.h"
+extern volatile uint32_t gGlobalSysTickCounter;
+#endif
 #include "ui/inputbox.h"
 #include "ui/main.h"
 #include "ui/menu.h"
@@ -1365,6 +1369,59 @@ static void CheckKeys(void)
 
 void APP_TimeSlice10ms(void)
 {
+#ifdef ENABLE_MIC_PROBE
+    // Throwaway diagnostic: how fast can we actually watch the microphone?
+    // Sampling lives here, in the 10 ms slice, because the first version sat in
+    // the 500 ms APRS block and measured 2 samples/s — its own hook rate, not
+    // anything about the hardware. Drawing stays slow: blitting the LCD at
+    // 100 Hz would swamp the SPI bus, so the readout refreshes at 10 Hz.
+    {
+        // RX powers the mic ADC down and the radio reprograms the chip in its
+        // own loop, so re-assert it. ONLY the mic ADC: also setting TX DSP
+        // fights the receive path and the radio then sees a signal everywhere.
+        BK4819_WriteRegister(BK4819_REG_30,
+            BK4819_ReadRegister(BK4819_REG_30) | (1u << 2));
+
+        // REG_79<15:11> is the VOX detection interval, i.e. the window the
+        // amplitude is measured over; it defaults to 8. At the default the
+        // envelope only resolved 60 ms bursts, which caps the bit rate, so
+        // wind it down to 1 and see how much faster it follows. Bits <10:0>
+        // are the VOX-off threshold and must be preserved.
+        BK4819_WriteRegister(0x79,
+            (uint16_t)((BK4819_ReadRegister(0x79) & 0x07FFu) | (1u << 11)));
+
+        const uint16_t v = BK4819_GetVoiceAmplitudeOut();
+        static uint16_t peak, polls, sps, burst, shortest = 9999, draw;
+        static uint32_t win;
+        static bool was_on;
+
+        if (v > peak) peak = v;
+        polls++;
+        if (gGlobalSysTickCounter - win >= 100u) {   // 100 ticks = 1 s
+            win = gGlobalSysTickCounter;
+            sps = polls;
+            polls = 0;
+        }
+
+        const bool on = (v > 300u);
+        if (on) {
+            burst++;
+        } else if (was_on) {
+            if (burst > 0 && burst < shortest) shortest = burst;
+            burst = 0;
+        }
+        was_on = on;
+
+        if (++draw >= 10) {           // ~10 Hz on screen, 100 Hz sampling
+            draw = 0;
+            char s[17];
+            sprintf(s, "S%3u B%4u P%4u", sps, shortest == 9999 ? 0 : shortest, peak);
+            memset(gFrameBuffer[6], 0, LCD_WIDTH);
+            UI_PrintStringSmallNormal(s, 2, 0, 6);
+            ST7565_BlitFullScreen();
+        }
+    }
+#endif
     gNextTimeslice = false;
     gFlashLightBlinkCounter++;
 
@@ -1629,6 +1686,7 @@ void APP_TimeSlice500ms(void)
                              // state sticks at WAITING after the first frame
     }
 #endif
+
 
 #ifdef ENABLE_FEAT_F4HWN_SLEEP
     if (gSleepModeCountdown_500ms == gSetting_set_off * 120 && gWakeUp) {

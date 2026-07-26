@@ -47,6 +47,20 @@ ENABLE_APRS                     ?= 1
 # not by hardware TNCs — fine for a closed group, not for public infrastructure.
 # Build your own with: make ENABLE_APRS_DIGI=1 (all-band only, see below).
 ENABLE_APRS_DIGI                ?= 0
+# Throwaway diagnostic build: shows the live BK4819 voice-amplitude reading on
+# the radio's own screen, so the microphone can be measured with the cable OUT
+# (the accessory jack disconnects the internal mic). Never ship this.
+ENABLE_MIC_PROBE                ?= 0
+# Acoustic position input: hold a phone to the microphone and let it play the
+# coordinates as on-off keyed tone. Off by default — it needs flash the
+# amateur image does not have. See the acoustic notes in CLAUDE.md.
+ENABLE_APRS_ACOUSTIC            ?= 0
+ifeq ($(ENABLE_APRS_ACOUSTIC),1)
+    # ~520 bytes, and the all-band image has ~230 spare, so this pays the same
+    # way the digipeater does: AM broadcast gain compensation is the least
+    # useful thing on a radio dedicated to packet.
+    ENABLE_AM_FIX := 0
+endif
 ifeq ($(ENABLE_APRS_DIGI),1)
     # The digipeater costs ~540 bytes and neither image has that spare, so the
     # build pays for it by dropping AM broadcast gain compensation — the least
@@ -417,6 +431,12 @@ ifeq ($(ENABLE_APRS),1)
 endif
 ifeq ($(ENABLE_APRS_DIGI),1)
 	CFLAGS  += -DENABLE_APRS_DIGI
+endif
+ifeq ($(ENABLE_MIC_PROBE),1)
+	CFLAGS  += -DENABLE_MIC_PROBE
+endif
+ifeq ($(ENABLE_APRS_ACOUSTIC),1)
+	CFLAGS  += -DENABLE_APRS_ACOUSTIC
 endif
 ifeq ($(ENABLE_AM_FIX_SHOW_DATA),1)
 	CFLAGS  += -DENABLE_AM_FIX_SHOW_DATA

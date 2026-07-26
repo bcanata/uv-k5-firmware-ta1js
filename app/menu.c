@@ -408,6 +408,9 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 #endif
         case MENU_APRS_TX:
         case MENU_APRS_MSGSND:
+#ifdef ENABLE_APRS_ACOUSTIC
+        case MENU_APRS_ACIN:
+#endif
             *pMax = 1;  // OFF/ON
             break;
         case MENU_APRS_INTV:
@@ -1479,6 +1482,9 @@ void MENU_ShowCurrentSetting(void)
             break;
         case MENU_APRS_TX:
         case MENU_APRS_MSGSND:
+#ifdef ENABLE_APRS_ACOUSTIC
+        case MENU_APRS_ACIN:
+#endif
             gSubMenuSelection = 0;  // Always start at OFF
             break;
 #endif
@@ -1961,6 +1967,23 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
             APRS_SendMessage();
             return;
         }
+#ifdef ENABLE_APRS_ACOUSTIC
+        // Blocking listen: the radio is deaf and unresponsive for up to 15 s,
+        // which is why it is an explicit action rather than a background mode.
+        if (UI_MENU_GetCurrentMenuId() == MENU_APRS_ACIN) {
+            int32_t la = 0, lo = 0;
+            if (APRS_AcousticReceive(&la, &lo)) {
+                gEeprom.APRS_LATITUDE  = la;
+                gEeprom.APRS_LONGITUDE = lo;
+                SETTINGS_SaveAPRS();
+                AUDIO_PlayBeep(BEEP_880HZ_60MS_DOUBLE_BEEP);
+            } else {
+                AUDIO_PlayBeep(BEEP_500HZ_60MS_DOUBLE_BEEP);
+            }
+            gUpdateDisplay = true;
+            return;
+        }
+#endif
 #endif
 
         gAskForConfirmation = 0;

@@ -48,6 +48,9 @@ const t_menu_item MenuList[] =
 #ifdef ENABLE_APRS
     // APRS menu items
     {"APRS",    MENU_APRS_ON        },
+#ifdef ENABLE_APRS_ACOUSTIC
+    {"AcIn",    MENU_APRS_ACIN      },
+#endif
 #ifdef ENABLE_APRS_DIGI
     {"Digi",    MENU_APRS_DIGI      },
 #endif
@@ -1201,6 +1204,11 @@ void UI_DisplayMenu(void)
         case MENU_APRS_TX:      // one-shot actions: MENU fires them, no OFF/ON
             strcpy(String, "SEND\nBEACON");
             break;
+#ifdef ENABLE_APRS_ACOUSTIC
+        case MENU_APRS_ACIN:
+            strcpy(String, "PHONE\nTO MIC");
+            break;
+#endif
         case MENU_APRS_MSGSND:
             strcpy(String, "SEND\nMESSAGE");
             break;

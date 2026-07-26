@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UV-K5 · position by sound</title>
+<style>
+ body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:1.2rem;
+      background:#12161a;color:#dbe4ec;max-width:34rem;margin:auto}
+ h1{font-size:1.25rem} label{display:block;margin:.9rem 0 .25rem;color:#8fa3b4;font-size:.9rem}
+ input{width:100%;box-sizing:border-box;padding:.6rem;border-radius:8px;border:1px solid #2b3742;
+       background:#1a2129;color:inherit;font:inherit}
+ button{width:100%;padding:.85rem;margin-top:1rem;border-radius:10px;border:1px solid #3ddc84;
+        background:transparent;color:#3ddc84;font:inherit;font-weight:600}
+ button:active{background:#3ddc84;color:#04120a}
+ .m{color:#8fa3b4;font-size:.85rem;margin-top:1rem}
+ .f{margin-top:1.6rem;border-top:1px solid #2b3742;padding-top:1rem;color:#7b8b99;font-size:.8rem}
+ code{background:#1a2129;padding:.1rem .35rem;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>Send a position by sound</h1>
+<p class="m">On the radio open menu <b>AcIn</b> and press MENU, then hold the phone's
+speaker against the radio's microphone and press play. Takes about five seconds.</p>
+
+<label>Latitude <span style="opacity:.7">decimal, south negative</span></label>
+<input id="lat" inputmode="decimal" placeholder="40.9934" />
+<label>Longitude <span style="opacity:.7">decimal, west negative</span></label>
+<input id="lon" inputmode="decimal" placeholder="27.5997" />
+
+<button id="gps">Use my current location</button>
+<button id="play">Play to the radio</button>
+<p class="m" id="st"></p>
+
+<p class="f">The radio only accepts a frame whose CRC checks out, so a failed
+transfer is silent rather than wrong: if it does not double-beep, just play it
+again. Nothing is transmitted on air — this is only sound between two devices.</p>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const SYM_MS = 25;          // one Manchester symbol; must match the firmware
+const TONE_HZ = 1000;
+
+// CRC-16 with the AX.25 polynomial, matching APRS_CalculateCRC in the firmware
+// so the radio can reuse the routine it already carries.
+function crc16(bytes) {
+  let crc = 0xFFFF;
+  for (const b of bytes) {
+    crc ^= b;
+    for (let i = 0; i < 8; i++) crc = (crc & 1) ? ((crc >> 1) ^ 0x8408) : (crc >> 1);
+  }
+  return crc & 0xFFFF;
+}
+
+function frameBits(lat, lon) {
+  const buf = new Uint8Array(10);
+  const dv = new DataView(buf.buffer);
+  dv.setInt32(0, Math.round(lat * 1e6), true);
+  dv.setInt32(4, Math.round(lon * 1e6), true);
+  const c = crc16(buf.subarray(0, 8));
+  buf[8] = c & 0xFF; buf[9] = (c >> 8) & 0xFF;
+
+  const bits = [];
+  for (let i = 0; i < 16; i++) bits.push(1);      // preamble: trains the threshold
+  for (let i = 7; i >= 0; i--) bits.push((0xA5 >> i) & 1);   // sync
+  for (const b of buf) for (let i = 7; i >= 0; i--) bits.push((b >> i) & 1);
+  return bits;
+}
+
+// Manchester: 1 = tone then silence, 0 = silence then tone. Self-clocking, and
+// DC-balanced so the radio's threshold cannot drift into always-on or
+// always-off as the phone moves.
+async function play(lat, lon) {
+  const bits = frameBits(lat, lon);
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  await ctx.resume();
+  const sr = ctx.sampleRate;
+  const symLen = Math.round(sr * SYM_MS / 1000);
+  const buf = ctx.createBuffer(1, symLen * bits.length * 2 + sr * 0.1, sr);
+  const d = buf.getChannelData(0);
+
+  let p = 0;
+  const emit = (on) => {
+    for (let i = 0; i < symLen; i++, p++) {
+      // a couple of ms of ramp at each edge, or the clicks themselves carry
+      // energy the envelope detector sees as spurious bursts
+      const ramp = Math.min(1, Math.min(i, symLen - i) / (sr * 0.002));
+      d[p] = on ? Math.sin(2 * Math.PI * TONE_HZ * i / sr) * 0.9 * ramp : 0;
+    }
+  };
+  for (const b of bits) { emit(b === 1); emit(b !== 1); }
+
+  const src = ctx.createBufferSource();
+  src.buffer = buf; src.connect(ctx.destination); src.start();
+  return new Promise(r => { src.onended = r; });
+}
+
+$("gps").addEventListener("click", () => {
+  if (!navigator.geolocation) { $("st").textContent = "no geolocation here"; return; }
+  $("st").textContent = "locating…";
+  navigator.geolocation.getCurrentPosition(
+    p => { $("lat").value = p.coords.latitude.toFixed(5);
+           $("lon").value = p.coords.longitude.toFixed(5);
+           $("st").textContent = "got it, ±" + Math.round(p.coords.accuracy) + " m"; },
+    e => { $("st").textContent = "location failed: " + e.message; },
+    { enableHighAccuracy: true, timeout: 20000 });
+});
+
+$("play").addEventListener("click", async () => {
+  const la = parseFloat($("lat").value), lo = parseFloat($("lon").value);
+  if (!isFinite(la) || !isFinite(lo) || Math.abs(la) > 90 || Math.abs(lo) > 180) {
+    $("st").textContent = "enter a valid latitude and longitude"; return;
+  }
+  $("st").textContent = "playing — hold the phone against the microphone…";
+  try { await play(la, lo); $("st").textContent = "done. The radio double-beeps if it took."; }
+  catch (e) { $("st").textContent = "could not play: " + e.message; }
+});
+</script>
+</body>
+</html>
