@@ -10,6 +10,9 @@ compile_commands.json
 /docs/*
 !/docs/bk4819/
 !/docs/APRS.md
+!/docs/flash-budget.md
+# docs/flagcost.tsv stays ignored on purpose: it is regenerable build output
+# (sh utils/flag_cost_sweep.sh), and flash-budget.md carries the conclusions
 k5_eeprom.raw
 .DS_Store
 K5TOOL.log*
