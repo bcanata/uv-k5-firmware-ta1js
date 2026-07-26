@@ -357,6 +357,11 @@ char    gAPRS_RxDisplay[44];
 uint8_t gAPRS_RxDisplayTimer;       // 500 ms ticks
 bool    gAPRS_RxSticky;             // direct message: stays until dismissed
 
+// The last text message addressed to us, kept so the menu can call it back up
+// after the overlay box has timed out or been dismissed. RAM only - it does not
+// survive a power cycle, which is what keeps it cheap enough to fit.
+static char gAPRS_MsgLast[sizeof(gAPRS_RxDisplay)];
+
 static bool     gRxArmed;
 static bool     gRxCapturing;
 static uint8_t  gRxStuckTicks;
@@ -405,6 +410,31 @@ static void APRS_RxDrainFifo(uint8_t words)
         if (gRxCount < HDLC_BUF_SIZE) gHdlcBuf[gRxCount++] = (uint8_t)w;
         if (gRxCount < HDLC_BUF_SIZE) gHdlcBuf[gRxCount++] = (uint8_t)(w >> 8);
     }
+}
+
+// Expire the RX packet display / message overlay. When a message times out we
+// also drop the sticky flag so UI_DisplayMain redraws VFO B. Called from both
+// 500 ms branches: RdMsg can put the box up with listening OFF, and APRS_Task
+// does not run then, so the timeout has to live outside it or the box would
+// stay until a key was pressed.
+static void APRS_ExpireDisplay(void)
+{
+    if (gAPRS_RxDisplayTimer > 0 && --gAPRS_RxDisplayTimer == 0) {
+        gAPRS_RxDisplay[0] = 0;
+        gAPRS_RxSticky = false;
+        gUpdateDisplay = true;
+    }
+}
+
+// Menu "RdMsg": re-pop the stored message in the same overlay box a fresh one
+// uses. Deliberately not part of the decode path, so recalling a message never
+// re-acknowledges it and never touches the reply target.
+void APRS_RecallMessage(void)
+{
+    strcpy(gAPRS_RxDisplay, gAPRS_MsgLast[0] ? gAPRS_MsgLast : "NO MESSAGE");
+    gAPRS_RxSticky       = true;   // stays until dismissed, like a fresh one
+    gAPRS_RxDisplayTimer = 60;     // 30 s
+    gUpdateDisplay       = true;
 }
 
 // EXIT on the main screen clears a sticky message; returns true if consumed
@@ -805,6 +835,8 @@ static void APRS_ShowFrame(const uint8_t *frame, uint16_t len)
             gAPRS_RxDisplay[o++] = (c >= 32 && c < 127) ? c : '.';
         }
         gAPRS_RxDisplay[o] = 0;
+        if (!isack)
+            strcpy(gAPRS_MsgLast, gAPRS_RxDisplay);  // recallable from the menu
         gAPRS_RxSticky = true;
         gAPRS_RxDisplayTimer = 60;   // 30 s, then VFO B is redrawn
         gUpdateDisplay = true;
@@ -1337,13 +1369,7 @@ void APRS_Task(void)
 #ifdef ENABLE_APRS_DIGI
     APRS_DigiAge();
 #endif
-    // Expire the RX packet display / message overlay. When a message times
-    // out we also drop the sticky flag so UI_DisplayMain redraws VFO B.
-    if (gAPRS_RxDisplayTimer > 0 && --gAPRS_RxDisplayTimer == 0) {
-        gAPRS_RxDisplay[0] = 0;
-        gAPRS_RxSticky = false;
-        gUpdateDisplay = true;
-    }
+    APRS_ExpireDisplay();
 
     // Keep the receiver armed while idle. The engine's byte counter stalls
     // when the carrier drops (bit clock lock is lost), so RX_FINISHED often
@@ -1627,6 +1653,7 @@ done:
 // this one call and the two share a single prologue.
 void APRS_TxCooldown(void)
 {
+    APRS_ExpireDisplay();   // RdMsg works with listening off; see the note there
     if (gAPRSState == APRS_STATE_WAITING) {
         static uint32_t last_tx = 0;
         if (last_tx == 0) {

@@ -65,11 +65,19 @@ Flags:
 - `ENABLE_APRS` (default 1) — the whole APRS suite.
 - `ENABLE_AMATEUR_BAND_ONLY` (default 1) — restrict the VFO/TX to the Turkish
   amateur allocations reachable by the radio (17 m, 15 m, 12 m, 10 m, 6 m, 2 m,
-  430–440 MHz, 23 cm). Set `=0` to remove the restriction.
+  430–440 MHz, 23 cm). Set `=0` to remove the restriction. **It also turns
+  `ENABLE_FEAT_F4HWN_RESUME_STATE` off**, because that combination is 76 bytes
+  short of holding the message slot: the amateur image comes up on its
+  configured channel rather than the one it was last left on. The all-band
+  image keeps resume-state.
+
+Every other flag's flash cost is measured in
+[`flash-budget.md`](flash-budget.md) — check it before turning anything on, and
+re-measure with `sh utils/flag_cost_sweep.sh` if you change the baseline.
 
 ## Menu items
 
-The APRS group is the **first ten items** of the menu, so it is reachable without scrolling:
+The APRS group is the **first eleven items** of the menu, so it is reachable without scrolling:
 
 | Item | Meaning |
 |------|---------|
@@ -82,6 +90,7 @@ The APRS group is the **first ten items** of the menu, so it is reachable withou
 | MsgTo| Message destination, **callsign *and* SSID** (e.g. `VA3EMQ-7`) |
 | Msg  | Message text |
 | Send | Sends the message to MsgTo **the moment you press MENU** (the value area shows `SEND MESSAGE`) |
+| RdMsg | Shows the last message addressed to you again **the moment you press MENU** (shows `LAST MSG`) |
 | BEACON | Transmits one position beacon **the moment you press MENU** (shows `SEND BEACON`) |
 
 **Text entry** (Call/Cmnt/MsgTo/Msg): two digits per character —
@@ -108,16 +117,22 @@ text reset to defaults on power-up.
   number, so the receiving station acknowledges them. The ack arrives as
   `THEIRCALL-n>ackNN` in the message box — that is the delivery confirmation.
   Incoming numbered messages are acked automatically within ~0.5 s.
-- **Nothing is kept in the radio.** A received message is shown for 30 seconds
-  (or until you press a key) and then it is gone: the text lives in a single
-  RAM buffer that the next packet overwrites. There is no inbox, no history,
-  and nothing survives a power cycle — EEPROM holds only your settings
-  (callsign, SSID, position, interval, reply target), not traffic. Even the
-  message *you* typed into `Msg` is cleared at boot.
+- **One message is kept, and only until the next one or the next boot.** A
+  message addressed to you is shown for 30 seconds (or until you press a key),
+  and the text then stays in RAM so **RdMsg** can call it back up — useful when
+  the box times out while the radio is in your pocket. It is a single slot: the
+  next message addressed to you replaces it, and a power cycle clears it
+  (`NO MESSAGE`). An incoming `ack` is displayed but never stored, so RdMsg
+  always brings back the last real message rather than a delivery receipt.
+  Decoded position packets are not stored at all.
 
-  This is a space decision, not an oversight: the APRS settings occupy two
-  16-byte EEPROM rows with four spare bytes between them, and the amateur-band
-  image has a few dozen bytes of flash left. A useful inbox needs both.
+  There is still no inbox and no history, and EEPROM holds only your settings
+  (callsign, SSID, position, interval, reply target), never traffic — even the
+  message *you* typed into `Msg` is cleared at boot. That is a space decision,
+  not an oversight: the APRS settings occupy two 16-byte EEPROM rows with four
+  spare bytes between them, and this one RAM slot already cost 156 bytes of
+  flash — enough that the amateur image had to give up resume-state to hold it.
+  A real inbox needs both.
 
   If you want a log, keep it on the computer or phone instead — both companion
   tools below record every decoded packet and every message, and they persist

@@ -68,6 +68,9 @@ void APRS_StopListening(void);
 // Messaging
 void APRS_SendMessage(void);
 bool APRS_DismissMessage(void);
+// Re-show the last message addressed to us (menu "RdMsg"). RAM only, so it is
+// lost on a power cycle; "NO MESSAGE" if nothing has arrived this session.
+void APRS_RecallMessage(void);
 
 // "41.15N 27.84E" for the Loc menu display
 void APRS_FormatLatLon(char *out);

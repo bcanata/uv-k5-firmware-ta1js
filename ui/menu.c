@@ -62,6 +62,7 @@ const t_menu_item MenuList[] =
     {"MsgTo",   MENU_APRS_MSGTO     },
     {"Msg",     MENU_APRS_MSGTXT    },
     {"Send",    MENU_APRS_MSGSND    },
+    {"RdMsg",   MENU_APRS_MSGRD     },
     {"BEACON",  MENU_APRS_TX        },
 #endif
 //   text,          menu ID
@@ -1211,6 +1212,9 @@ void UI_DisplayMenu(void)
 #endif
         case MENU_APRS_MSGSND:
             strcpy(String, "SEND\nMESSAGE");
+            break;
+        case MENU_APRS_MSGRD:
+            strcpy(String, "LAST\nMSG");
             break;
         case MENU_APRS_MSGTO:
             if (gIsInSubMenu && edit_index >= 0)

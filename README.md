@@ -57,7 +57,8 @@ adds the APRS layer on top.
   from your saved location** on screen.
 - **Messaging** — send short APRS text messages. An incoming message addressed
   to your callsign pops up in a framed overlay box; it auto-clears after 30 s
-  or is dismissed by any key.
+  or is dismissed by any key, and the menu's **RdMsg** item calls the last one
+  back up until the next message or the next power-up replaces it.
 - **PC / phone control over USB** — send a beacon or message and monitor
   decoded traffic from a computer, or beacon a live GPS fix from the companion
   web tool.

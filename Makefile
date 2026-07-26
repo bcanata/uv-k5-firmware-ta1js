@@ -68,6 +68,15 @@ ifeq ($(ENABLE_APRS_DIGI),1)
     # all-band image; ENABLE_AMATEUR_BAND_ONLY=1 still overflows by ~200 bytes.
     ENABLE_AM_FIX := 0
 endif
+ifeq ($(ENABLE_AMATEUR_BAND_ONLY),1)
+    # The amateur image is 76 bytes short of holding the RdMsg message slot
+    # (issue #3) next to AM_FIX, and AM_FIX earns its keep on a radio that can
+    # still hear the airband. Resume-state is the cheapest thing worth enough
+    # (232 bytes): without it the radio comes up on its configured channel
+    # rather than the one it was last left on. All-band keeps it, having the
+    # room. Measured 2026-07-27: amateur 61268 (172 free), all-band 61320 (120).
+    ENABLE_FEAT_F4HWN_RESUME_STATE := 0
+endif
 
 # ---- CONTRIB MODS ----
 

@@ -1967,6 +1967,13 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
             APRS_SendMessage();
             return;
         }
+        // Recall the last message and leave the menu, so the overlay box lands
+        // over the main screen exactly as it does when one arrives off the air.
+        if (UI_MENU_GetCurrentMenuId() == MENU_APRS_MSGRD) {
+            APRS_RecallMessage();
+            gRequestDisplayScreen = DISPLAY_MAIN;
+            return;
+        }
 #ifdef ENABLE_APRS_ACOUSTIC
         // Blocking listen: the radio is deaf and unresponsive for up to 15 s,
         // which is why it is an explicit action rather than a background mode.
