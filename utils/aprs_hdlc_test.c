@@ -281,13 +281,13 @@ static void DigiConsider(const uint8_t *frame, uint16_t len)
     }
 }
 
-// build "SRC>APZUVK,<via1>,<via2>:info" as an AX.25 frame (with a dummy FCS)
+// build "SRC>APOVK5,<via1>,<via2>:info" as an AX.25 frame (with a dummy FCS)
 static uint16_t MkFrame(uint8_t *f, const char *src, uint8_t sssid,
                         const char *v1, uint8_t v1s, bool v1h,
                         const char *v2, uint8_t v2s, bool v2h, const char *info)
 {
     uint16_t i = 0;
-    AX25_EncodeAddress("APZUVK", 0, false, &f[i]); i += 7;
+    AX25_EncodeAddress("APOVK5", 0, false, &f[i]); i += 7;
     AX25_EncodeAddress(src, sssid, false, &f[i]);  i += 7;
     if (v1) { AX25_EncodeAddress(v1, v1s, v2 == NULL, &f[i]); if (v1h) f[i+6] |= 0x80; i += 7; }
     if (v2) { AX25_EncodeAddress(v2, v2s, true,       &f[i]); if (v2h) f[i+6] |= 0x80; i += 7; }
@@ -372,7 +372,7 @@ int main(void)
     static const uint8_t INFO[] = "!1000.00N/02000.00E>UV-K5 APRS";
     uint8_t frame[7 * 4 + 2 + (sizeof(INFO) - 1) + 2];
     uint16_t idx = 0;
-    AX25_EncodeAddress("APZUVK", 0, false, &frame[idx]); idx += 7;  // mirrors APRS_TOCALL
+    AX25_EncodeAddress("APOVK5", 0, false, &frame[idx]); idx += 7;  // mirrors APRS_TOCALL
     AX25_EncodeAddress("N0CALL", 0, false, &frame[idx]); idx += 7;
     AX25_EncodeAddress("WIDE1", 1, false, &frame[idx]); idx += 7;
     AX25_EncodeAddress("WIDE2", 1, true,  &frame[idx]); idx += 7;
@@ -469,7 +469,7 @@ int main(void)
     printf("info=\"%.*s\"\n", best_len - 2 - 30, &rxframe[30]);
 
     bool ok = (want == got) && rxframe[28] == 0x03 && rxframe[29] == 0xF0 &&
-              !memcmp(dst, "APZUVK", 6) && !memcmp(src, "N0CALL", 6) &&
+              !memcmp(dst, "APOVK5", 6) && !memcmp(src, "N0CALL", 6) &&
               !memcmp(via, "WIDE1 ", 6) && !memcmp(via2, "WIDE2 ", 6) &&
               (rxframe[20] & 1) == 0 && (rxframe[27] & 1) == 1;
     printf(ok ? "ALL CHECKS PASSED\n" : "CHECKS FAILED\n");

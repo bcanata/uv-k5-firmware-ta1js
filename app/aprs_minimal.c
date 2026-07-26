@@ -28,6 +28,9 @@
 #include "../driver/system.h"
 #ifdef ENABLE_APRS_ACOUSTIC
 #include "../driver/systick.h"
+#include "../driver/st7565.h"
+#include "../ui/helper.h"
+#include "../external/printf/printf.h"
 #endif
 #ifdef ENABLE_UART
     #include "../driver/uart.h"
@@ -255,9 +258,11 @@ bool APRS_Configured(void)
 
 // AX.25 destination for every frame we transmit: this is what identifies the
 // firmware to the APRS network (aprs.fi, aprs.im and friends resolve it to a
-// device name). APZUVK is from the experimental APZ range, pending a registered
-// tocall — see aprsorg/aprs-deviceid#333.
-#define APRS_TOCALL "APZUVK"
+// device name). APOVK5 is ours, allocated by the tocall registry on 2026-07-26
+// (aprsorg/aprs-deviceid#333) as "UV-K5 TA1JS", so aprs.fi and friends name the
+// radio instead of showing it as experimental. It replaced APZUVK; the registry
+// no longer hands out APZ*, which was only ever a stopgap.
+#define APRS_TOCALL "APOVK5"
 
 static uint16_t APRS_BuildHeader(uint8_t *frame)
 {
@@ -1466,6 +1471,11 @@ static void APRS_PendingTx(void)
 
 static uint16_t AC_Env(void)
 {
+    // Re-assert on every read. Writing REG_30 once at entry read a flat 5 —
+    // something clears the mic ADC bit behind us even while we block, and the
+    // probe only ever worked because it rewrote the bit every 10 ms.
+    BK4819_WriteRegister(BK4819_REG_30,
+        (uint16_t)(BK4819_ReadRegister(BK4819_REG_30) | (1u << 2)));
     return BK4819_GetVoiceAmplitudeOut();
 }
 
@@ -1481,94 +1491,130 @@ static uint16_t AC_SymbolLevel(void)
     return (uint16_t)(sum / 10u);
 }
 
+// Every stage reports on the LCD. A single pass/fail beep tells you nothing
+// about which of six stages broke, and this runs blind with the cable out, so
+// the screen is the only instrument available.
+static void AC_Say(uint8_t line, const char *text)
+{
+    memset(gFrameBuffer[line], 0, LCD_WIDTH);
+    UI_PrintStringSmallNormal(text, 2, 0, line);
+    ST7565_BlitFullScreen();
+}
+
+static void AC_SayNum(uint8_t line, const char *tag, int32_t a, int32_t b)
+{
+    char t[17];
+    if (b < 0) sprintf(t, "%s %ld", tag, (long)a);
+    else       sprintf(t, "%s %ld %ld", tag, (long)a, (long)b);
+    AC_Say(line, t);
+}
+
 bool APRS_AcousticReceive(int32_t *lat_out, int32_t *lon_out)
 {
     const uint16_t r30 = BK4819_ReadRegister(BK4819_REG_30);
     const uint16_t r79 = BK4819_ReadRegister(0x79);
-    // mic ADC on (only that: TX DSP would fight the receive path), and the
-    // amplitude window narrowed so short bursts survive
     BK4819_WriteRegister(BK4819_REG_30, (uint16_t)(r30 | (1u << 2)));
     BK4819_WriteRegister(0x79, (uint16_t)((r79 & 0x07FFu) | (1u << 11)));
 
     bool ok = false;
-    uint16_t floor_lvl = 0xFFFF, ceil_lvl = 0;
+    uint16_t floor_lvl = 0xFFFF, ceil_lvl = 0, peak = 0;
     uint32_t waited = 0;
 
-    // Learn the room: the quiet floor, then the first tone that clearly beats
-    // it. An absolute threshold cannot work when the phone's distance and the
-    // room's noise are both unknown.
+    memset(gFrameBuffer, 0, sizeof(gFrameBuffer));
+    AC_Say(0, "ACOUSTIC IN");
+
     for (uint8_t i = 0; i < 40; i++) {
         const uint16_t v = AC_Env();
         if (v < floor_lvl) floor_lvl = v;
         SYSTICK_DelayUs(AC_SUB_US);
     }
     const uint16_t arm = (uint16_t)(floor_lvl + 200u);
+    AC_SayNum(1, "FLR", floor_lvl, arm);
 
-    while (waited < AC_GIVEUP_MS * 1000u) {
-        if (AC_Env() > arm) break;
-        SYSTICK_DelayUs(AC_SUB_US);
-        waited += AC_SUB_US;
+    AC_Say(2, "WAITING...");
+    {
+        uint16_t tick = 0;
+        while (waited < AC_GIVEUP_MS * 1000u) {
+            const uint16_t v = AC_Env();
+            if (v > peak) peak = v;
+            if (v > arm) break;
+            if (++tick >= 40u) {          // ~10 Hz: watch the level move
+                tick = 0;
+                AC_SayNum(2, "WAIT lvl", v, peak);
+            }
+            SYSTICK_DelayUs(AC_SUB_US);
+            waited += AC_SUB_US;
+        }
     }
-    if (waited >= AC_GIVEUP_MS * 1000u)
-        goto done;                       // nothing ever arrived
+    if (waited >= AC_GIVEUP_MS * 1000u) {
+        AC_SayNum(2, "NO SIGNAL pk", peak, -1);
+        goto done;
+    }
+    AC_SayNum(2, "ARMED pk", peak, -1);
 
-    // Ride the preamble to learn how loud "on" actually is, then put the
-    // decision threshold halfway between that and the floor.
     for (uint8_t i = 0; i < 16; i++) {
         const uint16_t v = AC_SymbolLevel();
         if (v > ceil_lvl) ceil_lvl = v;
     }
-    if (ceil_lvl < floor_lvl + 400u)
-        goto done;                       // too quiet to call bits reliably
     const uint16_t thresh = (uint16_t)((floor_lvl + ceil_lvl) / 2u);
-
-    // Hunt for the sync byte, then read the payload. Manchester means each bit
-    // is two symbols and the pair always differs; a matching pair is a framing
-    // error, which is exactly how noise announces itself.
-    uint8_t  buf[10];
-    uint8_t  sync = 0;
-    uint16_t guard = 0;
-    do {
-        const bool a = AC_SymbolLevel() > thresh;
-        const bool b = AC_SymbolLevel() > thresh;
-        if (a == b)
-            goto done;                   // not Manchester any more: give up
-        sync = (uint8_t)((sync << 1) | (a ? 1u : 0u));
-    } while (sync != 0xA5u && ++guard < 200u);
-    if (sync != 0xA5u)
+    AC_SayNum(3, "CEI", ceil_lvl, thresh);
+    if (ceil_lvl < floor_lvl + 400u) {
+        AC_Say(5, "TOO QUIET");
         goto done;
-
-    for (uint8_t i = 0; i < sizeof(buf); i++) {
-        uint8_t byte = 0;
-        for (uint8_t bit = 0; bit < 8; bit++) {
-            const bool a = AC_SymbolLevel() > thresh;
-            const bool b = AC_SymbolLevel() > thresh;
-            if (a == b)
-                goto done;
-            byte = (uint8_t)((byte << 1) | (a ? 1u : 0u));
-        }
-        buf[i] = byte;
     }
 
     {
+        uint8_t  buf[10];
+        uint8_t  sync = 0;
+        uint16_t guard = 0;
+        bool     manch = false;
+
+        do {
+            const bool a = AC_SymbolLevel() > thresh;
+            const bool b = AC_SymbolLevel() > thresh;
+            if (a == b) { manch = true; break; }
+            sync = (uint8_t)((sync << 1) | (a ? 1u : 0u));
+        } while (sync != 0xA5u && ++guard < 200u);
+
+        AC_SayNum(4, "SY", sync, guard);
+        if (manch)          { AC_Say(5, "MANCH ERR SYNC"); goto done; }
+        if (sync != 0xA5u)  { AC_Say(5, "NO SYNC"); goto done; }
+
+        for (uint8_t i = 0; i < sizeof(buf); i++) {
+            uint8_t byte = 0;
+            for (uint8_t bit = 0; bit < 8; bit++) {
+                const bool a = AC_SymbolLevel() > thresh;
+                const bool b = AC_SymbolLevel() > thresh;
+                if (a == b) { AC_SayNum(5, "MANCH ERR B", i, bit); goto done; }
+                byte = (uint8_t)((byte << 1) | (a ? 1u : 0u));
+            }
+            buf[i] = byte;
+        }
+
         const uint16_t want = (uint16_t)(buf[8] | (buf[9] << 8));
-        if (APRS_CalculateCRC(buf, 8) != want)
-            goto done;                   // refuse outright, never half-apply
+        const uint16_t got  = APRS_CalculateCRC(buf, 8);
+        if (got != want) { AC_SayNum(5, "CRC", got, want); goto done; }
+
         int32_t la, lo;
         memcpy(&la, &buf[0], sizeof(la));
         memcpy(&lo, &buf[4], sizeof(lo));
-        if (la < -90000000 || la > 90000000 || lo < -180000000 || lo > 180000000)
+        if (la < -90000000 || la > 90000000 || lo < -180000000 || lo > 180000000) {
+            AC_Say(5, "RANGE");
             goto done;
+        }
         *lat_out = la;
         *lon_out = lo;
         ok = true;
+        AC_Say(5, "OK");
     }
 
 done:
     BK4819_WriteRegister(0x79, r79);
     BK4819_WriteRegister(BK4819_REG_30, r30);
+    SYSTEM_DelayMs(4000);      // leave the diagnosis on screen to be read
     return ok;
 }
+
 #endif  // ENABLE_APRS_ACOUSTIC
 
 // Cooldown after a transmission: WAITING -> IDLE, one second later.
