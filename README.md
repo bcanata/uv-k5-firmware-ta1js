@@ -205,3 +205,14 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+## Sponsorlar / Sponsors
+
+Bu projeyi [GitHub Sponsors](https://github.com/sponsors/bcanata) üzerinden destekleyebilirsiniz.
+Destekçilerin adı (ve kurumsal destekçilerin logosu) aşağıda yer alır.
+
+You can support this project via [GitHub Sponsors](https://github.com/sponsors/bcanata).
+Sponsors are listed below, with logos for organisation-tier sponsors.
+
+<!-- sponsors -->
+<!-- /sponsors -->
