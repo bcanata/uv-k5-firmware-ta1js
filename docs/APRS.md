@@ -1,8 +1,9 @@
 # APRS for the Quansheng UV-K5 (no external TNC)
 
 This firmware turns a UV-K5/K6/5R into a self-contained **APRS station** — it
-transmits and receives 1200 baud Bell 202 (AX.25) packets using only the radio's
-BK4819 chip. No sound card, no TNC, no phone app required to be on the air.
+transmits and receives 1200 baud AX.25 packets using only the radio's BK4819
+chip (receive is standard Bell 202; transmit is FFSK 1200/1800 Hz, see
+*Compatibility* below). No sound card, no TNC, no phone app required to be on the air.
 
 Verified on-air between two UV-K5s and against the live 144.800 MHz network.
 
@@ -159,13 +160,14 @@ Local scripts (Python + pyserial):
 ## How it works (short version)
 
 TX builds an AX.25 UI frame, software-encodes HDLC (flags, bit stuffing, NRZI,
-FCS), and clocks it out via the BK4819 hardware FSK engine as Bell 202 tones.
+FCS), and clocks it out via the BK4819 hardware FSK engine as FFSK 1200/1800 Hz
+tones (not Bell 202's 1200/2200, see *Compatibility* above).
 RX arms the FSK engine on the NRZI flag pattern, captures raw bits, then
 software-decodes and parses. See `CLAUDE.md` for the register-level detail and
 the on-air verification notes.
 
 ## Credits
 
-Bell 202 hardware-FSK approach informed by gvJaime/uv-k5-firmware-aprs; position
+Hardware-FSK approach informed by gvJaime/uv-k5-firmware-aprs; position
 parsers ported from F4JTV/aprs_decoder; built on the F4HWN / egzumer /
 OneOfEleven / DualTachyon firmware lineage.

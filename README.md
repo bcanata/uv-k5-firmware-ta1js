@@ -1,9 +1,17 @@
 # UV-K5 APRS — a self-contained APRS station for the Quansheng UV-K5/K6/5R
 
 This firmware turns a Quansheng UV-K5/K6/5R handheld into a standalone **APRS
-station** — 1200 baud Bell 202 (AX.25) transmit *and* receive using only the
-radio's BK4819 chip. No sound card, no external TNC, no phone app required to
-be on the air.
+station** — 1200 baud AX.25 transmit *and* receive using only the radio's
+BK4819 chip. No sound card, no external TNC, no phone app required to be on the
+air.
+
+> [!IMPORTANT]
+> **Transmit is not standard Bell 202.** The radio sends FFSK **1200/1800 Hz**
+> (Bell 202 is 1200/**2200** Hz), because that is the closest tone pair the
+> BK4819's hardware modem offers. Software decoders (Dire Wolf, APRSDroid,
+> digipeaters, igates, another UV-K5 running this firmware) copy it, but radios
+> with a built-in hardware TNC such as the **Kenwood TH-D75** may not. Receive
+> is standard Bell 202. See [Compatibility](#compatibility-who-can-decode-our-transmissions).
 
 Verified on-air between two UV-K5s and against the live 144.800 MHz network
 (beacons digipeated and igated onto aprs.fi; packets from other stations
@@ -14,8 +22,9 @@ which builds on [Egzumer](https://github.com/egzumer/uv-k5-firmware-custom),
 [OneOfEleven](https://github.com/OneOfEleven/uv-k5-firmware-custom),
 [fagci's spectrum analyzer](https://github.com/fagci/uv-k5-firmware-fagci-mod),
 and ultimately [DualTachyon's open firmware](https://github.com/DualTachyon/uv-k5-firmware).
-All the stock radio features from those projects are still present — this fork
-adds the APRS layer on top.
+This fork adds the APRS layer on top. Most of the stock F4HWN radio features
+are still present, but several had to be switched off to make room in the 60 KB
+flash — see [Features disabled to fit APRS](#features-disabled-to-fit-aprs).
 
 > [!IMPORTANT]
 > **Licensed amateurs only.** APRS transmits on amateur frequencies. You must
@@ -39,6 +48,8 @@ adds the APRS layer on top.
 
 * [What it does](#what-it-does)
 * [How it works](#how-it-works)
+* [Compatibility: who can decode our transmissions](#compatibility-who-can-decode-our-transmissions)
+* [Features disabled to fit APRS](#features-disabled-to-fit-aprs)
 * [Building](#building)
 * [Flashing](#flashing)
 * [Configuring your station](#configuring-your-station)
@@ -67,8 +78,9 @@ adds the APRS layer on top.
 - **Amateur-band restriction** — VFO and TX are limited to the amateur
   allocations reachable by the radio (optional; on by default).
 
-Everything the base F4HWN firmware does (multiple screen layouts, improved
-S-meter, power levels, scan lists, and so on) still works alongside APRS.
+The core of the base F4HWN firmware (screen layouts, improved S-meter, power
+levels, scan lists, and so on) still works alongside APRS, but not every
+feature: see [Features disabled to fit APRS](#features-disabled-to-fit-aprs).
 
 ## How it works
 
@@ -76,14 +88,64 @@ APRS is generated and decoded entirely in software on the radio, driving the
 BK4819's hardware FSK engine — there is no external modem.
 
 - **TX** — an AX.25 UI frame is built in software with a CRC-16/X.25 FCS,
-  HDLC-encoded (bit stuffing + NRZI), and clocked out by the BK4819's FSK
-  engine configured for Bell 202 1200/2200 Hz tones. No software bit-banging.
+  HDLC-encoded (bit stuffing + NRZI), and clocked out by the BK4819's hardware
+  FSK engine in its **FFSK 1200/1800 Hz** mode. No software bit-banging. The
+  chip's modem only offers 1200/1800 and 1200/2400 Hz tone pairs, so true Bell
+  202 (1200/2200 Hz) is not available from it; the space tone measured on air
+  with an SDR is ≈ 1800 Hz.
 - **RX** — while APRS is on, the FSK engine is armed to hunt for AX.25 flags; a
   streaming software decoder does NRZI decode, bit destuffing and FCS checking,
-  then parses the position and displays it.
+  then parses the position and displays it. Receive handles standard Bell 202
+  (1200/2200 Hz) traffic from any station.
 
 The full register recipe, frame format and decoder details are documented in
 [`docs/APRS.md`](docs/APRS.md) and the reference PDFs under `docs/bk4819/`.
+
+## Compatibility: who can decode our transmissions
+
+Because the transmitted space tone is 1800 Hz instead of 2200 Hz:
+
+| Decodes our transmissions | May not decode them |
+|---|---|
+| Another UV-K5 running this firmware | Radios with a built-in hardware TNC: Kenwood TH-D7x / TH-D74 / **TH-D75**, Yaesu sets with an internal TNC |
+| Dire Wolf, APRSDroid and other soundcard/DSP modems | |
+| Software digipeaters and igates, so beacons **do** reach aprs.fi | |
+
+Receiving is unaffected: the radio decodes standard Bell 202 packets from
+everyone, including those radios.
+
+True Bell 202 transmit (1200/2200 Hz) is an **open issue**, tracked in
+[issue #1](https://github.com/bcanata/uv-k5-firmware-ta1js/issues/1). It needs
+the tones generated in software (switching tones every 833 µs) instead of by
+the chip's modem, and has not been verified on air yet.
+
+## Features disabled to fit APRS
+
+The APRS suite takes about 9 KB, and the radio has 60 KB of flash. To make room,
+the APRS edition builds with these stock F4HWN features **off by default**:
+
+| Feature | Build flag |
+|---|---|
+| VOX | `ENABLE_VOX` |
+| 1750 Hz tone burst | `ENABLE_TX1750` |
+| Microphone audio bar | `ENABLE_AUDIO_BAR` |
+| Small bold font | `ENABLE_SMALL_BOLD` |
+| RX/TX timer | `ENABLE_FEAT_F4HWN_RX_TX_TIMER` |
+| Sleep mode | `ENABLE_FEAT_F4HWN_SLEEP` |
+| FM broadcast radio | `ENABLE_FMRADIO` |
+| Spectrum analyzer (bandscope) | `ENABLE_SPECTRUM` |
+
+The amateur-band image (`ENABLE_AMATEUR_BAND_ONLY=1`, the default) also turns
+off **resume state** (`ENABLE_FEAT_F4HWN_RESUME_STATE`): the radio powers up on
+its configured channel instead of the one it was last left on. The all-band
+image keeps it.
+
+FM radio and the spectrum analyzer cannot be added back alongside APRS: the
+spectrum analyzer alone needs about 6.5 KB, far more than is free. If you need
+them, use F4HWN's own broadcast or bandscope editions. The other features can be
+re-enabled per build (`make ENABLE_VOX=1 …`) only if you free up the same amount
+of flash elsewhere; [`docs/flash-budget.md`](docs/flash-budget.md) lists what
+each flag costs.
 
 ## Building
 
@@ -97,8 +159,7 @@ make ENABLE_APRS=0       # plain radio, no APRS
 ```
 
 To fit the flash budget, the APRS edition disables several stock features by
-default (VOX, TX1750, mic audio bar, small-bold font, RX/TX timer, sleep, FM
-radio, spectrum analyzer). Re-enable any of them per build if you free up space.
+default; see [Features disabled to fit APRS](#features-disabled-to-fit-aprs).
 
 Key flags:
 
